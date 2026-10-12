@@ -1,0 +1,5 @@
+10-12 02:26:36.003 17593 17698 F libc    : Fatal signal 11 (SIGSEGV), code 1 (SEGV_MAPERR), fault addr 0x10 in tid 17698 (.NET TP Worker), pid 17593 (om.godmode.maui)
+10-12 02:26:36.117 17706 17706 I crash_dump64: obtaining output fd from tombstoned, type: kDebuggerdTombstoneProto
+10-12 02:26:36.145 17706 17706 I crash_dump64: performing dump of process 17593 (target tid = 17698)
+10-12 02:26:37.146   671  1719 I ActivityManager: Process com.godmode.maui (pid 17593) has died: fg  TOP 
+10-12 02:26:37.146   463   463 I Zygote  : Process 17593 exited due to signal 11 (Segmentation fault)

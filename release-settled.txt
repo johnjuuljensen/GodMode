@@ -1,0 +1,15 @@
+rel-settled #1 mode=settled pid=25335 after=25335 sent_ms=34542 fetched1=0 notifications=3 crashlines=0
+rel-settled #2 mode=settled pid=25560 after=25560 sent_ms=34284 fetched1=0 notifications=3 crashlines=0
+rel-settled #3 mode=settled pid=25785 after=25785 sent_ms=34882 fetched1=0 notifications=3 crashlines=0
+rel-settled #4 mode=settled pid=26015 after=26015 sent_ms=36670 fetched1=0 notifications=3 crashlines=0
+rel-settled #5 mode=settled pid=26244 after=26244 sent_ms=36350 fetched1=0 notifications=3 crashlines=0
+rel-settled #6 mode=settled pid=26473 after=26473 sent_ms=36401 fetched1=0 notifications=3 crashlines=0
+rel-settled #7 mode=settled pid=26703 after=26703 sent_ms=34960 fetched1=0 notifications=3 crashlines=0
+rel-settled #8 mode=settled pid=26941 after=26941 sent_ms=34174 fetched1=0 notifications=3 crashlines=0
+rel-settled #9 mode=settled pid=27171 after=27171 sent_ms=34693 fetched1=0 notifications=3 crashlines=0
+rel-settled #10 mode=settled pid=27397 after=27397 sent_ms=34835 fetched1=0 notifications=3 crashlines=0
+rel-settled #11 mode=settled pid=27623 after=27623 sent_ms=34911 fetched1=0 notifications=3 crashlines=0
+rel-settled #12 mode=settled pid=27853 after=27853 sent_ms=36157 fetched1=0 notifications=3 crashlines=0
+rel-settled #13 mode=settled pid=28107 after=28107 sent_ms=37010 fetched1=0 notifications=3 crashlines=0
+rel-settled #14 mode=settled pid=28334 after=28334 sent_ms=37442 fetched1=0 notifications=3 crashlines=0
+rel-settled #15 mode=settled pid=28561 after=28561 sent_ms=35757 fetched1=0 notifications=0 crashlines=0

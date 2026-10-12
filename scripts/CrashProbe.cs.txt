@@ -1,0 +1,71 @@
+// TEMPORARY (IS#274 investigation, not committed): crashes the process in a chosen way, to compare the logcat signature
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+
+namespace GodMode.Maui;
+
+public sealed record CrashProbePayload(string Kind);
+
+public static class CrashProbe
+{
+    [DllImport("libc", EntryPoint = "memset")] private static extern IntPtr Memset(IntPtr dest, int c, nint count);
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int Recurse(int n) { Span<byte> pad = stackalloc byte[64]; pad[0] = (byte)n; return Recurse(n + 1) + pad[0]; }
+
+    private static async Task Hammer(bool addLike)
+    {
+        var alias = $"{AppInfo.PackageName}.microsoft.maui.essentials.preferences";
+        int lost = 0, failed = 0, rounds = 30;
+        for (var r = 0; r < rounds; r++)
+        {
+            Platform.AppContext.DeleteSharedPreferences(alias);
+            try
+            {
+                if (addLike)
+                {
+                    var key = $"godmode.server-token.r{r}";
+                    await SecureStorage.Default.SetAsync(key, "token" + r);
+                    var got = await Task.WhenAll(Enumerable.Range(0, 3).Select(_ => Task.Run(() => SecureStorage.Default.GetAsync(key))));
+                    lost += got.Count(g => g != "token" + r);
+                }
+                else
+                {
+                    var tasks = Enumerable.Range(0, 8).Select(i => Task.Run(async () =>
+                    {
+                        if (i % 2 == 0) await SecureStorage.Default.SetAsync($"k{i}", "v" + i);
+                        else await SecureStorage.Default.GetAsync("k0");
+                    })).ToArray();
+                    await Task.WhenAll(tasks);
+                    for (var i = 0; i < 8; i += 2)
+                        if (await SecureStorage.Default.GetAsync($"k{i}") != "v" + i) lost++;
+                }
+            }
+            catch (Exception ex)
+            {
+                failed++;
+                Android.Util.Log.Warn("IS274", $"round {r}: {ex.GetType().Name}: {ex.Message}");
+            }
+            Android.Util.Log.Info("IS274", $"{(addLike ? "add" : "mixed")} round {r} done: lost={lost} failed={failed}");
+        }
+        Android.Util.Log.Info("IS274", $"HAMMER {(addLike ? "add" : "mixed")} DONE rounds={rounds} lost={lost} failed={failed}");
+    }
+
+    public static bool Run(string kind)
+    {
+        Action crash = kind switch
+        {
+            "overflow-pool" => () => Task.Run(() => Recurse(0)),
+            "overflow-thread" => () => new Thread(() => Recurse(0)).Start(),
+            "overflow-main" => () => MainThread.BeginInvokeOnMainThread(() => Recurse(0)),
+            "native-pool" => () => Task.Run(() => Memset(16, 0, 8)),
+            "native-main" => () => MainThread.BeginInvokeOnMainThread(() => Memset(16, 0, 8)),
+            "hammer-add" => () => _ = Hammer(addLike: true),
+            "hammer-mixed" => () => _ = Hammer(addLike: false),
+            "managed-null" => () => Task.Run(() => { string? s = null; return s!.Length; }),
+            _ => throw new ArgumentException(kind),
+        };
+        _ = Task.Delay(300).ContinueWith(_ => crash());
+        return true;
+    }
+}

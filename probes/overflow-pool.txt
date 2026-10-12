@@ -1,0 +1,3 @@
+10-12 02:26:14.845 17418 17450 F mono-rt : [ERROR] FATAL UNHANDLED EXCEPTION: System.StackOverflowException: The requested operation caused a stack overflow.
+10-12 02:26:14.845 17418 17450 F mono-rt : at GodMode.Maui.CrashProbe.Recurse (int) [0x0001b] in <966086d97cd7454ba35b2b1d357124e8>:0
+10-12 02:26:15.827   671  1706 I ActivityManager: Process com.godmode.maui (pid 17418) has died: fg  TOP 

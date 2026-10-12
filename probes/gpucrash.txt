@@ -1,0 +1,5 @@
+10-12 02:33:24.936 18417 18481 F libc    : Fatal signal 11 (SIGSEGV), code 1 (SEGV_MAPERR), fault addr 0x0 in tid 18481 (Chrome_ChildIOT), pid 18417 (om.godmode.maui)
+10-12 02:33:25.071 18524 18524 I crash_dump64: obtaining output fd from tombstoned, type: kDebuggerdTombstoneProto
+10-12 02:33:25.073 18524 18524 I crash_dump64: performing dump of process 18417 (target tid = 18481)
+10-12 02:33:26.423   671  1180 I ActivityManager: Process com.godmode.maui (pid 18417) has died: fg  TOP 
+10-12 02:33:26.425   463   463 I Zygote  : Process 18417 exited due to signal 11 (Segmentation fault)

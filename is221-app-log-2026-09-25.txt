@@ -1,0 +1,21 @@
+10:42:57.737 [INF] Maui: Starting GodMode MAUI app
+10:42:58.759 [INF] LocalServer: Listening on http://127.0.0.1:35387
+10:42:58.835 [INF] Maui: LocalServer listening on http://127.0.0.1:35387
+10:43:05.651 [INF] ShellBridge: Shell bridge #1 attached; bridges listening for notification taps: 1
+10:43:19.897 [INF] AttentionService: Attention service created
+10:43:21.562 [INF] AttentionService: No server to watch; stopping the attention service
+10:43:26.184 [INF] AttentionService: Attention service destroyed
+10:43:26.442 [DBG] AttentionNotifier: Summary cancelled
+10:43:33.563 [INF] ServerDirectory: Discovered 0 servers: []
+10:44:37.541 [INF] ShellBridge: Registered local server 8c3aef557de14818a3e09317fa53b7ee (Emu Server)
+10:44:37.941 [INF] AttentionService: Attention service created
+10:44:52.938 [INF] Maui: Starting GodMode MAUI app
+10:44:55.088 [INF] LocalServer: Listening on http://127.0.0.1:39369
+10:44:55.315 [INF] Maui: LocalServer listening on http://127.0.0.1:39369
+10:44:59.352 [INF] AttentionService: Attention service created
+10:45:03.996 [DBG] ServerUrlSelector: Health check http://10.0.2.2:31351/health -> OK
+10:45:04.096 [INF] AttentionWatcher: Watching attention on server 8c3aef557de14818a3e09317fa53b7ee (Emu Server)
+10:45:04.332 [DBG] ServerUrlSelector: Health check http://10.0.2.2:31351/health -> OK
+10:45:07.395 [DBG] AttentionNotifier: Notification 8c3aef557de14818a3e09317fa53b7ee:Default%2Fwork%2Fneeds-me: Error
+10:45:07.497 [DBG] AttentionNotifier: Notification 8c3aef557de14818a3e09317fa53b7ee:Default%2Fwork%2Fneeds-me-2: Error
+10:45:07.536 [INF] AttentionWatcher: Attention connection to server 8c3aef557de14818a3e09317fa53b7ee is up

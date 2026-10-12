@@ -1,0 +1,14 @@
+diff --git a/src/GodMode.Maui/Bridge/ShellBridge.cs b/src/GodMode.Maui/Bridge/ShellBridge.cs
+index 6b9fb08..9ac959f 100644
+--- a/src/GodMode.Maui/Bridge/ShellBridge.cs
++++ b/src/GodMode.Maui/Bridge/ShellBridge.cs
+@@ -138,6 +138,9 @@ public sealed class ShellBridge : IDisposable
+             return Task.FromResult(true);
+         });
+ 
++#if ANDROID
++        _bridge.Handle<CrashProbePayload, bool>("debug.crash", p => Task.FromResult(CrashProbe.Run(p.Kind))); // TEMPORARY IS#274
++#endif
+         _bridge.Handle(ShellMessageTypes.VoiceState, () => Task.FromResult(_voice.Status));
+         _bridge.Handle(ShellMessageTypes.VoiceStart, _voice.StartAsync);
+         _bridge.Handle(ShellMessageTypes.VoiceStop, _voice.StopAsync);

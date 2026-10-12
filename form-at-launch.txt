@@ -1,0 +1,7 @@
+# Debug app, the real Add Server form driven over CDP right as the page could take it (formloop.sh launch 5)
+# times from the click: button text, route
+crashlines=0 form="page-ready+124ms; 2ms #/servers/add|Add Server| ; 30ms #/servers/add|Adding...| ; 1229ms #/|no-button|"
+crashlines=0 form="page-ready+98ms; 1ms #/servers/add|Add Server| ; 28ms #/servers/add|Adding...| ; 1318ms #/|no-button|"
+crashlines=0 form="page-ready+99ms; 3ms #/servers/add|Add Server| ; 30ms #/servers/add|Adding...| ; 1174ms #/|no-button|"
+crashlines=0 form="page-ready+93ms; 2ms #/servers/add|Add Server| ; 29ms #/servers/add|Adding...| ; 1266ms #/|no-button|"
+crashlines=0 form="page-ready+115ms; 3ms #/servers/add|Add Server| ; 30ms #/servers/add|Adding...| ; 1434ms #/|no-button|"

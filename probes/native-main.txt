@@ -1,0 +1,5 @@
+10-12 02:31:36.587 18238 18238 F libc    : Fatal signal 11 (SIGSEGV), code 1 (SEGV_MAPERR), fault addr 0x10 in tid 18238 (om.godmode.maui), pid 18238 (om.godmode.maui)
+10-12 02:31:36.830 18347 18347 I crash_dump64: obtaining output fd from tombstoned, type: kDebuggerdTombstoneProto
+10-12 02:31:36.849 18347 18347 I crash_dump64: performing dump of process 18238 (target tid = 18238)
+10-12 02:31:38.580   463   463 I Zygote  : Process 18238 exited due to signal 11 (Segmentation fault)
+10-12 02:31:38.591   671  1717 I ActivityManager: Process com.godmode.maui (pid 18238) has died: fg  TOP 

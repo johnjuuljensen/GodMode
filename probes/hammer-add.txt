@@ -1,0 +1,3 @@
+10-12 02:38:48.820 18706 18817 I IS274   : add round 28 done: lost=0 failed=0
+10-12 02:38:49.171 18706 18736 I IS274   : add round 29 done: lost=0 failed=0
+10-12 02:38:49.171 18706 18736 I IS274   : HAMMER add DONE rounds=30 lost=0 failed=0

@@ -1,0 +1,6 @@
+emit {"type":"system","subtype":"init","session_id":"{{session_id}}"}
+await-stdin
+emit {"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Which branch should I push to?"}]},"session_id":"{{session_id}}"}
+sleep 50
+emit {"type":"result","subtype":"success","is_error":false,"num_turns":1,"result":"Which branch should I push to?","session_id":"{{session_id}}","usage":{"input_tokens":1,"output_tokens":1}}
+await-stdin
