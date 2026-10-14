@@ -1,3 +1,5 @@
+using System.ComponentModel;
+using System.Reflection;
 using System.Text.Json;
 using GodMode.FakeClaude;
 using GodMode.Server.Services;
@@ -146,7 +148,7 @@ public class SpeakTests
         Assert.Null(done.SpokenSummary);
         var call = Assert.Single((await run.WaitForLaunchAsync(id, l => l.Calls.Count > 0)).Calls);
         Assert.StartsWith($"{SpeakTool.Name} error:", call);
-        Assert.Contains($"at most {SpeakTool.MaxLength}", call);
+        Assert.Contains($"at most {SpeakTool.AdvertisedMaxLength} can be spoken", call);
         Assert.Null((await ItemAsync(run, id))?.Spoken);
     }
 
@@ -257,16 +259,50 @@ public class SpeakTests
     public void CheckRecap_RefusesMoreThanALine_SayingHowLong()
     {
         var (_, refused) = SpeakTool.CheckRecap(new string('a', SpeakTool.RecapMaxLength + 1));
-        Assert.StartsWith($"The recap is {SpeakTool.RecapMaxLength + 1} characters, and at most {SpeakTool.RecapMaxLength}", refused);
+        Assert.StartsWith($"The recap is {SpeakTool.RecapMaxLength + 1} characters, and at most {SpeakTool.AdvertisedRecapMaxLength} can be spoken", refused);
         Assert.Null(SpeakTool.CheckRecap(new string('a', SpeakTool.RecapMaxLength)).Refused);
+    }
+
+    /// <summary>A session is told less than is enforced (issue #590): a recap between the two is accepted without a word.</summary>
+    [Fact]
+    public void CheckRecap_AcceptsARecapBetweenTheAdvertisedAndTheEnforcedLength()
+    {
+        Assert.True(SpeakTool.AdvertisedRecapMaxLength < SpeakTool.RecapMaxLength);
+        Assert.Null(SpeakTool.CheckRecap(new string('a', SpeakTool.AdvertisedRecapMaxLength + 20)).Refused);
     }
 
     [Fact]
     public void Check_RefusesALongText_SayingHowLong()
     {
         var (_, refused) = SpeakTool.Check(new string('a', SpeakTool.MaxLength + 5));
-        Assert.Contains($"{SpeakTool.MaxLength + 5} characters", refused);
+        Assert.Contains($"{SpeakTool.MaxLength + 5} characters, and at most {SpeakTool.AdvertisedMaxLength} can be spoken", refused);
         Assert.Null(SpeakTool.Check(new string('a', SpeakTool.MaxLength)).Refused);
+    }
+
+    /// <summary>A session is told less than is enforced (issue #590): a text between the two is accepted without a word.</summary>
+    [Fact]
+    public void Check_AcceptsATextBetweenTheAdvertisedAndTheEnforcedLength()
+    {
+        Assert.True(SpeakTool.AdvertisedMaxLength < SpeakTool.MaxLength);
+        Assert.Null(SpeakTool.Check(new string('a', SpeakTool.AdvertisedMaxLength + 60)).Refused);
+    }
+
+    /// <summary>What a session reads states the advertised limits, never the enforced ones.</summary>
+    [Fact]
+    public void WhatASessionReads_StatesTheAdvertisedLimits()
+    {
+        Assert.Equal(SpeakTool.AdvertisedMaxLength.ToString(), SpeakTool.AdvertisedMaxLengthText);
+        Assert.Equal(SpeakTool.AdvertisedRecapMaxLength.ToString(), SpeakTool.AdvertisedRecapMaxLengthText);
+        Assert.Contains($"at most {SpeakTool.AdvertisedMaxLength} characters", SpeakTool.Instructions);
+        Assert.DoesNotContain(SpeakTool.MaxLength.ToString(), SpeakTool.Instructions);
+
+        var speak = typeof(SpeakTool).GetMethod(nameof(SpeakTool.Speak))!;
+        var described = string.Join(" ", new[] { speak.GetCustomAttribute<DescriptionAttribute>()!.Description }
+            .Concat(speak.GetParameters().Select(p => p.GetCustomAttribute<DescriptionAttribute>()?.Description ?? "")));
+        Assert.Contains($"at most {SpeakTool.AdvertisedMaxLength} characters", described);
+        Assert.Contains($"At most {SpeakTool.AdvertisedRecapMaxLength} characters", described);
+        Assert.DoesNotContain(SpeakTool.MaxLength.ToString(), described);
+        Assert.DoesNotContain(SpeakTool.RecapMaxLength.ToString(), described);
     }
 }
 

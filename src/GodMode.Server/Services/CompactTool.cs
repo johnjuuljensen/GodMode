@@ -37,7 +37,7 @@ public sealed class CompactTool(IProjectManager projects, ILogger<CompactTool> l
         "It only schedules: end your turn right after calling it, with no more tool calls (speak first, if you speak). When " +
         "your turn has ended, GodMode sends /compact with your instructions, then your continuation as your next input. " +
         "Refused while a compaction is pending, while the session is in a /compact it did not ask for, and outside a turn. " +
-        "Input the user sends meanwhile cancels the continuation: the user has taken over. At most 8000 characters each.")]
+        "Input the user sends meanwhile cancels the continuation: the user has taken over. At most " + SessionInbox.AdvertisedMaxTextLengthText + " characters each.")]
     public string Compact(
         RequestContext<CallToolRequestParams> context,
         [Description("What you do next, in your own words, sent to you as your next input once the compaction is done: the " +

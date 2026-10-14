@@ -421,7 +421,7 @@ public class ParentMessageTests
 
         var tooLong = await CallResultAsync(run, child);
         Assert.Contains("error:", tooLong);
-        Assert.Contains($"at most {SessionInbox.MaxTextLength}", tooLong);
+        Assert.Contains($"at most {SessionInbox.AdvertisedMaxTextLength} are sent", tooLong);
 
         await run.Client.Hub.InvokeAsync<DeleteProjectResult>(nameof(IProjectHub.DeleteProject), parent, true);
         await run.CallAsync(fleet, "send", new() { ["session"] = child, ["text"] = "Try again" });

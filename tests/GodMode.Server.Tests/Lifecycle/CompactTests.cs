@@ -245,10 +245,12 @@ public class CompactTests : IDisposable
     }
 
     [Fact]
-    public async Task ASecondCall_AnEmptyOrLongContinuation_AreRefused()
+    public async Task ASecondCall_AnEmptyOrlongContinuation_AreRefused()
     {
+        var longContinuation = Continuation + " " + new string('x', SessionInbox.AdvertisedMaxTextLength);
+        // The one scheduled is over the advertised length, and under the enforced one (issue #590)
         var script = CallCompact(CallCompact(CallCompact(CallCompact(new FakeScript().EmitInit().AwaitStdin(), continuation: " "),
-                continuation: new string('x', SessionInbox.MaxTextLength + 1))), continuation: "a second one")
+                continuation: new string('x', SessionInbox.MaxTextLength + 1)), continuation: longContinuation), continuation: "a second one")
             .EmitResult("opened").AwaitStdin().Emit(CompactBoundary).Emit(SilentResult)
             .AwaitStdin().EmitResult("carried on").AwaitStdin();
         await using var harness = new LifecycleHarness(script, mcpEndpoint: true);
@@ -261,7 +263,7 @@ public class CompactTests : IDisposable
         Assert.StartsWith($"{CompactTool.Name} error:", launch.Calls[0]);
         Assert.Contains("empty", launch.Calls[0]);
         Assert.StartsWith($"{CompactTool.Name} error:", launch.Calls[1]);
-        Assert.Contains("8000", launch.Calls[1]);
+        Assert.Contains($"at most {SessionInbox.AdvertisedMaxTextLength} are sent", launch.Calls[1]);
         Assert.Equal($"{CompactTool.Name} {CompactTool.Scheduled}", launch.Calls[2]);
         Assert.StartsWith($"{CompactTool.Name} error:", launch.Calls[3]);
         Assert.Contains("already pending", launch.Calls[3]);
