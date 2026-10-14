@@ -85,9 +85,9 @@ public partial class ProjectManager
         if (string.IsNullOrWhiteSpace(continuation))
             throw new ArgumentException("The continuation is empty: say what you do next, since after the compaction you have only its summary.");
         if (continuation.Length > SessionInbox.MaxTextLength)
-            throw new ArgumentException($"The continuation has {continuation.Length} characters; at most {SessionInbox.MaxTextLength} are sent. Shorten it, or point to where the rest is.");
+            throw new ArgumentException($"The continuation has {continuation.Length} characters; at most {SessionInbox.AdvertisedMaxTextLength} are sent. Shorten it, or point to where the rest is.");
         if (instructions?.Length > SessionInbox.MaxTextLength)
-            throw new ArgumentException($"The instructions have {instructions.Length} characters; at most {SessionInbox.MaxTextLength} are sent.");
+            throw new ArgumentException($"The instructions have {instructions.Length} characters; at most {SessionInbox.AdvertisedMaxTextLength} are sent.");
 
         var process = project.Process;
         if (process.Compaction != null)
@@ -116,7 +116,7 @@ public partial class ProjectManager
     {
         if (string.IsNullOrWhiteSpace(text)) throw new ArgumentException("The message is empty.");
         if (text.Length > SessionInbox.MaxTextLength)
-            throw new ArgumentException($"The message has {text.Length} characters; at most {SessionInbox.MaxTextLength} are sent. Shorten it, or point to where the rest is.");
+            throw new ArgumentException($"The message has {text.Length} characters; at most {SessionInbox.AdvertisedMaxTextLength} are sent. Shorten it, or point to where the rest is.");
     }
 
     /// <summary>

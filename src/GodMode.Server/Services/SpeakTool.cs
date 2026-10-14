@@ -28,13 +28,22 @@ public sealed partial class SpeakTool(ILogger<SpeakTool> logger)
     public const int MaxLength = 300;
 
     /// <summary>
+    /// The most characters a session is told a spoken text may have (issue #590): less than <see cref="MaxLength"/> on
+    /// purpose, since a model aims at the limit it is given, not under it, and a text between the two is accepted.
+    /// </summary>
+    public const int AdvertisedMaxLength = 240;
+
+    /// <summary><see cref="AdvertisedMaxLength"/> as text, for the constants a session reads (an attribute takes no interpolated int).</summary>
+    public const string AdvertisedMaxLengthText = "240";
+
+    /// <summary>
     /// What the MCP server tells every session on <see cref="McpEndpointUrl.Path"/> (its <c>instructions</c>, which
     /// Claude Code puts in the session's system prompt, so it holds on every turn): call <c>speak</c> each turn.
     /// </summary>
     public const string Instructions =
         "The user may follow this session by voice, hands-free, with no screen. On every turn, whether or not they are " +
         "listening now, call the " + Name + " tool once, as the last thing before your final reply, with a short spoken " +
-        "version of that reply: one or two plain sentences, at most 300 characters, in the language you reply in, ending " +
+        "version of that reply: one or two plain sentences, at most " + AdvertisedMaxLengthText + " characters, in the language you reply in, ending " +
         "with your question if you have one. Then write your full reply as usual. Call it from your main conversation " +
         "only, never from a subagent. If it refuses the text, it says why: fix the text and call it again. " +
         "When where the session stands changes (a pull request opened, the tests went green, you are blocked, the work " +
@@ -47,10 +56,16 @@ public sealed partial class SpeakTool(ILogger<SpeakTool> logger)
     /// <summary>The most characters a recap may have, its whitespace collapsed: one line (issue #466).</summary>
     public const int RecapMaxLength = 200;
 
+    /// <summary>The most characters a session is told a recap may have: less than <see cref="RecapMaxLength"/>, as <see cref="AdvertisedMaxLength"/>.</summary>
+    public const int AdvertisedRecapMaxLength = 160;
+
+    /// <summary><see cref="AdvertisedRecapMaxLength"/> as text.</summary>
+    public const string AdvertisedRecapMaxLengthText = "160";
+
     [McpServerTool(Name = Name)]
     [Description("Gives the spoken version of this turn's reply, which GodMode's voice says word for word to a user who " +
         "listens rather than reads. Call it once on every turn, as the last thing before your final reply, from your main " +
-        "conversation (never a subagent): one or two plain spoken sentences, at most 300 characters, ending with your " +
+        "conversation (never a subagent): one or two plain spoken sentences, at most " + AdvertisedMaxLengthText + " characters, ending with your " +
         "question if you have one. No markdown, code, paths, URLs or lists: say what they are instead. The full reply is " +
         "still written as usual, and stays on screen. A later call in the same turn replaces an earlier one. With a " +
         "recap, it also keeps the session's one line of where it stands until another replaces it. With its outcome, it says " +
@@ -60,7 +75,7 @@ public sealed partial class SpeakTool(ILogger<SpeakTool> logger)
         RequestContext<CallToolRequestParams> context,
         [Description("What to say, e.g. \"The fix is pushed and the tests pass. Shall I open the pull request?\"")] string text,
         [Description("Only when where the session stands changed: one plain line of where it stands now, not what this " +
-            "turn did, e.g. \"Pull request 456 is open, the tests pass, waiting for review\". At most 200 characters. " +
+            "turn did, e.g. \"Pull request 456 is open, the tests pass, waiting for review\". At most " + AdvertisedRecapMaxLengthText + " characters. " +
             "Kept until a later call gives another.")] string? recap = null,
         [Description("How this turn ends: \"done\" (the work is complete), \"needs-you\" (a decision or input is " +
             "needed), \"continuing\" (you carry on by yourself: a background task, waiting on CI or a review) or " +
@@ -83,18 +98,19 @@ public sealed partial class SpeakTool(ILogger<SpeakTool> logger)
 
     /// <summary>
     /// The text as voice says it, its whitespace collapsed, or why it cannot be said: it is empty, longer than
-    /// <see cref="MaxLength"/>, or written for a screen (markdown, code, a URL, a list).
+    /// <see cref="MaxLength"/> (the refusal names <see cref="AdvertisedMaxLength"/>, which a retry then aims at), or
+    /// written for a screen (markdown, code, a URL, a list).
     /// </summary>
-    public static (string Spoken, string? Refused) Check(string? text) => Check(text, "text", MaxLength,
+    public static (string Spoken, string? Refused) Check(string? text) => Check(text, "text", MaxLength, AdvertisedMaxLength,
         "say less, in one or two sentences; the full reply on screen has the rest.");
 
     /// <summary>
     /// The recap as voice says it, or why it cannot be said, as <see cref="Check(string?)"/> checks a text, at most
-    /// <see cref="RecapMaxLength"/> characters. A recap that is missing or blank is none: (null, null).
+    /// <see cref="RecapMaxLength"/> characters (refused naming <see cref="AdvertisedRecapMaxLength"/>). A recap that is missing or blank is none: (null, null).
     /// </summary>
     public static (string? Recap, string? Refused) CheckRecap(string? recap) =>
         string.IsNullOrWhiteSpace(recap) ? (null, null)
-            : Check(recap, "recap", RecapMaxLength, "say only where the session stands, in one line.");
+            : Check(recap, "recap", RecapMaxLength, AdvertisedRecapMaxLength, "say only where the session stands, in one line.");
 
     /// <summary>The outcomes as <c>speak</c> takes them, by their names on the wire.</summary>
     public static readonly IReadOnlyDictionary<string, TurnOutcome> Outcomes = new Dictionary<string, TurnOutcome>(StringComparer.OrdinalIgnoreCase)
@@ -116,13 +132,13 @@ public sealed partial class SpeakTool(ILogger<SpeakTool> logger)
         var named => (null, $"The outcome '{named}' is not one GodMode knows: give {string.Join(", ", Outcomes.Keys)}."),
     };
 
-    private static (string Spoken, string? Refused) Check(string? text, string what, int maxLength, string sayLess)
+    private static (string Spoken, string? Refused) Check(string? text, string what, int maxLength, int advertisedLength, string sayLess)
     {
         var spoken = Normalize(text);
         return spoken switch
         {
             "" => (spoken, $"The {what} is empty: give one or two spoken sentences."),
-            _ when spoken.Length > maxLength => (spoken, $"The {what} is {spoken.Length} characters, and at most {maxLength} can be spoken: {sayLess}"),
+            _ when spoken.Length > maxLength => (spoken, $"The {what} is {spoken.Length} characters, and at most {advertisedLength} can be spoken: {sayLess}"),
             _ when Url().IsMatch(spoken) => (spoken, $"The {what} has a URL, which cannot be spoken: say what it is instead."),
             _ when ListItem().IsMatch(text!) => (spoken, $"The {what} is a list: say it as plain sentences."),
             _ when spoken.IndexOfAny(ScreenCharacters) is var at and >= 0 => (spoken,

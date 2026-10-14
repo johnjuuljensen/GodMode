@@ -28,7 +28,7 @@ public sealed class MessageParentTool(IProjectManager projects, ILogger<MessageP
     [Description("Sends a message to your parent: the GodMode session that started you (your overseer). It reaches it labelled " +
         "as yours, as its next input once it can take one: at once when it is idle, after its turn when it is working, after " +
         "the user has answered when it waits on the user, and with its resume when it is stopped. Returns whether it was " +
-        "delivered now or held, and why. Refused when you have no parent, and while 50 messages or 64000 characters are held for it. At most 8000 characters.")]
+        "delivered now or held, and why. Refused when you have no parent, and while 50 messages or 64000 characters are held for it. At most " + SessionInbox.AdvertisedMaxTextLengthText + " characters.")]
     public async Task<string> MessageParentAsync(
         RequestContext<CallToolRequestParams> context,
         [Description("The message: a report, a question you parked, or feedback")] string text)

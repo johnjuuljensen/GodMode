@@ -22,6 +22,16 @@ public static class SessionInbox
     /// <summary>The most characters one message may have: <c>message_parent</c> and the fleet's <c>send</c> refuse a longer one.</summary>
     public const int MaxTextLength = 8000;
 
+    /// <summary>
+    /// The most characters a session is told one message may have (issue #590), here and for <c>compact</c>'s
+    /// continuation and instructions: less than <see cref="MaxTextLength"/> on purpose, since a model aims at the limit
+    /// it is given, not under it. A text between the two is accepted; a refusal names this one.
+    /// </summary>
+    public const int AdvertisedMaxTextLength = 7000;
+
+    /// <summary><see cref="AdvertisedMaxTextLength"/> as text, for the descriptions a session reads (an attribute takes no interpolated int).</summary>
+    public const string AdvertisedMaxTextLengthText = "7000";
+
     /// <summary>The most messages held for one session at once: past it, a new one is refused.</summary>
     public const int MaxHeld = 50;
 

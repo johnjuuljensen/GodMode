@@ -174,7 +174,8 @@ public sealed class FleetTools(IProjectManager projects, IHubContext<ProjectHub,
     [Description("Sends the session a message, as the app's reply does: to its running claude, or it is resumed with it. " +
         "While the session waits on a permission prompt or a question, which are the user's to answer in the app, the message is " +
         "held, labelled as yours, and reaches it once the user has answered and its turn has ended; Held then says so. " +
-        "Within one config dir, SendMessage to its Address does the same without the server.")]
+        "Within one config dir, SendMessage to its Address does the same without the server. At most " +
+        SessionInbox.AdvertisedMaxTextLengthText + " characters.")]
     public async Task<string> SendAsync(
         RequestContext<CallToolRequestParams> context,
         [Description("The session's ID")] string session,
@@ -247,7 +248,8 @@ public sealed class FleetTools(IProjectManager projects, IHubContext<ProjectHub,
     [Description("Asks the user to decide something: an item in the user's inbox on your session, with text and url (the issue or " +
         "pull request to decide it on). It stays until the user has seen it, whatever your turns do after it; a second escalate " +
         "replaces the first, so name every open decision in it. Escalate once per decision, not once per turn. Keep assigning " +
-        "the issue or pull request to the user too: that is the record, this is the nudge. Only a session can escalate.")]
+        "the issue or pull request to the user too: that is the record, this is the nudge. Only a session can escalate. At most " +
+        SessionInbox.AdvertisedMaxTextLengthText + " characters.")]
     public async Task<string> EscalateAsync(
         RequestContext<CallToolRequestParams> context,
         [Description("What the user is to decide, in a sentence or two")] string text,
