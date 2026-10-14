@@ -95,6 +95,9 @@ public interface IProjectManager
     /// <summary>The user has seen what the project needs: its result, review, question in plain text, error or escalation (hub MarkSeen).</summary>
     Task MarkSeenAsync(string projectId);
 
+    /// <summary>The user opened the project: what is on screen where they land is seen, by kind (hub MarkOpened, <see cref="Attention.Opened"/>).</summary>
+    Task MarkOpenedAsync(string projectId);
+
     /// <summary>Sets how much the project may interrupt the user, in its settings.json (hub SetImportance, issue #438).</summary>
     Task SetImportanceAsync(string projectId, Importance importance);
 

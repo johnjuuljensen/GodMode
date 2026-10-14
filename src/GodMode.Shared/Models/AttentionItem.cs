@@ -57,6 +57,12 @@ namespace GodMode.Shared.Models;
 /// Whether <paramref name="Text"/> was cut (it ends in "…"): the app shows such an item as a short card, read and
 /// answered in its session (issue #548). Left out of the JSON when false.
 /// </param>
+/// <param name="Acknowledged">
+/// Whether the user has looked at the <see cref="AttentionKind.Permission"/> or <see cref="AttentionKind.Question"/> its
+/// claude waits on (issue #592: opened the project, <see cref="Hubs.IProjectHub.MarkOpened"/>), which only an answer
+/// clears: its <paramref name="Alert"/> is then <see cref="AttentionAlert.Inbox"/>, so nothing notifies or announces it
+/// again, and the app's inbox leaves it out. It is still listed, as the project still waits on it. Left out of the JSON when false.
+/// </param>
 public record AttentionItem(
     string ProjectId,
     string ProjectName,
@@ -74,4 +80,5 @@ public record AttentionItem(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] Importance Importance = Importance.Normal,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] AttentionAlert Alert = AttentionAlert.Notify,
     TurnOutcome? Outcome = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool Truncated = false);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool Truncated = false,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool Acknowledged = false);

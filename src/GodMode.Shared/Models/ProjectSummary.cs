@@ -32,6 +32,10 @@ namespace GodMode.Shared.Models;
 /// <param name="LastOutputAt">When its main conversation last wrote a line, as in <see cref="ProjectStatus.LastOutputAt"/> (issue #468).</param>
 /// <param name="BackgroundTasks">What it runs in the background, or null for nothing, as in <see cref="ProjectStatus.BackgroundTasks"/> (issue #432).</param>
 /// <param name="Progress">How far its work has got, as in <see cref="ProjectStatus.Progress"/> (issue #545).</param>
+/// <param name="QuestionSeen">
+/// Whether the user has seen its <paramref name="CurrentQuestion"/> (<see cref="ProjectStatus.QuestionSeen"/>, issue #592):
+/// it may still hold it for a reply to answer, but it waits on the user no more. Left out of the JSON when false.
+/// </param>
 public record ProjectSummary(
     string Id,
     string Name,
@@ -57,7 +61,8 @@ public record ProjectSummary(
     DateTime? LastResultAt = null,
     DateTime? LastOutputAt = null,
     IReadOnlyList<BackgroundTask>? BackgroundTasks = null,
-    WorkProgress? Progress = null
+    WorkProgress? Progress = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool QuestionSeen = false
 )
 {
     /// <summary>
@@ -88,5 +93,6 @@ public record ProjectSummary(
         LastResultAt: status.LastResultAt,
         LastOutputAt: status.LastOutputAt,
         BackgroundTasks: status.BackgroundTasks,
-        Progress: status.Progress);
+        Progress: status.Progress,
+        QuestionSeen: status.QuestionSeen);
 }

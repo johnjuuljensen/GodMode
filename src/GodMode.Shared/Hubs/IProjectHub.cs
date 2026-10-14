@@ -96,9 +96,21 @@ public interface IProjectHub
     /// <see cref="Enums.AttentionKind.Review"/>, its question in plain text (<see cref="Enums.AttentionKind.Question"/>
     /// with no <see cref="AttentionItem.Question"/>) or its <see cref="Enums.AttentionKind.Error"/>, which leave
     /// <see cref="GetAttention"/> until there is a new one. Changes no state: a seen question still waits for its
-    /// reply. Persisted, so it holds after a server restart. A pending permission or AskUserQuestion is unaffected.
+    /// reply. Persisted, so it holds after a server restart. A pending permission or AskUserQuestion stays, as only an
+    /// answer clears it, but is <see cref="AttentionItem.Acknowledged"/>.
     /// </summary>
     Task MarkSeen(string projectId);
+
+    /// <summary>
+    /// The user opened the project (issue #592): its view is in front, in a focused window or the app in the foreground.
+    /// What its item points at is seen when it is on screen where the user lands, by kind: its last result
+    /// (<see cref="Enums.AttentionKind.Finished"/>), its question in plain text, and an
+    /// <see cref="Enums.AttentionKind.Escalation"/> no turn has started after, as <see cref="MarkSeen"/> sees them; a
+    /// pending permission or AskUserQuestion is <see cref="AttentionItem.Acknowledged"/>. An earlier escalation, an
+    /// <see cref="Enums.AttentionKind.Error"/> and a <see cref="Enums.AttentionKind.Review"/>, which the view does not
+    /// show where the user lands, stay. Changes no state.
+    /// </summary>
+    Task MarkOpened(string projectId);
 
     /// <summary>
     /// Sets how much the project may interrupt the user (issue #438), in its <c>settings.json</c>, so every client and voice

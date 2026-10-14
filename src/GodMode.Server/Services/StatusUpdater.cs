@@ -79,6 +79,12 @@ public class StatusUpdater : IStatusUpdater
                         status = status with { SpokenSummary = null, Outcome = null };
                         stateChanged = true;
                     }
+                    // An escalation is above this turn in the output now: opening the project leaves it (issue #592)
+                    if (status.Escalation is { Earlier: false })
+                    {
+                        status = Attention.TurnStarted(status);
+                        stateChanged = true;
+                    }
                 }
                 // A recap is the session's standing, not the turn's reply: kept as soon as its call is, until another
                 // replaces it, so no turn's start, end or error clears it (issue #466)

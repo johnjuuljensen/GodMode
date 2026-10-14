@@ -8,7 +8,7 @@ import { projectKey } from '../../store/projectKey';
 import { ProjectItem } from './ProjectItem';
 import { UnmanagedGroup } from './UnmanagedGroup';
 import { Inbox } from '../Inbox/Inbox';
-import { useInboxAttention } from '../Inbox/useInboxAttention';
+import { useAttentionBesidesOpen } from '../Inbox/useInboxAttention';
 import { VoiceControl } from '../Voice/VoiceControl';
 import './Sidebar.css';
 
@@ -238,9 +238,12 @@ function FoldToggle({ folded, onToggle, what, children }: {
   );
 }
 
-/** Whether a session needs the user: an item in the inbox for it, as its server says (#441), the open session's left out (#549). */
+/**
+ * Whether a session needs the user: an item for it, as its server says (#441), the open session's left out (#549). A
+ * question or permission the user has looked at counts until it is answered (#592), though the inbox leaves it out.
+ */
 function useNeedsYou(): (item: SidebarItem) => boolean {
-  const attention = useInboxAttention();
+  const attention = useAttentionBesidesOpen();
   const attentionKeys = new Set(attention.map(a => projectKey(a.serverId, a.ProjectId)));
   return item => attentionKeys.has(item.key);
 }

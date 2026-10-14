@@ -117,6 +117,19 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         }
     }
 
+    public async Task MarkOpened(string projectId)
+    {
+        _logger.LogInformation("Client {ConnectionId} opened project {ProjectId}", Context.ConnectionId, projectId);
+        try
+        {
+            await _projectManager.MarkOpenedAsync(projectId);
+        }
+        catch (KeyNotFoundException ex)
+        {
+            throw new HubException(ex.Message);
+        }
+    }
+
     public async Task SetImportance(string projectId, Importance importance)
     {
         _logger.LogInformation("Client {ConnectionId} sets project {ProjectId} {Importance}", Context.ConnectionId, projectId, importance);

@@ -73,6 +73,8 @@ export class FakeHub {
   /** Every RespondToPermission's decision, MarkSeen and CreateProject, in order. */
   decisions: { projectId: string; requestId: string; decision: PermissionDecision }[] = [];
   seen: string[] = [];
+  /** Every MarkOpened, in order (#592). */
+  opened: string[] = [];
   created: { profileName: string; rootName: string; actionName: string | null; inputs: Record<string, unknown> }[] = [];
   /** What createProject answers, when not a new Running project: an action that starts no session answers with no project. */
   createResult?: CreateProjectResult;
@@ -168,6 +170,7 @@ export class FakeHub {
     this.decisions.push({ projectId, requestId, decision });
   }
   async markSeen(projectId: string) { this.invoke(); this.seen.push(projectId); }
+  async markOpened(projectId: string) { this.invoke(); this.opened.push(projectId); }
   /** Every SetImportance, in order. The server pushes the project's status with it, as ProjectManager does. */
   importances: { projectId: string; importance: Importance }[] = [];
   async setImportance(projectId: string, importance: Importance) {
