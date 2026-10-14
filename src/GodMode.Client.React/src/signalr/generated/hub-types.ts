@@ -261,6 +261,13 @@ export interface AttentionItem {
    * its session (issue #548). Left out of the JSON when false.
    */
   Truncated?: boolean;
+  /**
+   * Whether the user has looked at the AttentionKind.Permission or AttentionKind.Question its claude waits on
+   * (issue #592: opened the project, IProjectHub.MarkOpened), which only an answer clears: its Alert is then
+   * AttentionAlert.Inbox, so nothing notifies or announces it again, and the app's inbox leaves it out. It is
+   * still listed, as the project still waits on it. Left out of the JSON when false.
+   */
+  Acknowledged?: boolean;
 }
 
 /**
@@ -345,6 +352,12 @@ export interface Escalation {
   Text: string;
   /** Where to decide it (an issue or a pull request), if it gave one. */
   Url?: string | null;
+  /**
+   * Whether a turn has started since it asked (issue #592): it is then above that turn in the output, where
+   * the user who opens the project does not land, so opening the project leaves it. Left out of the JSON when
+   * false.
+   */
+  Earlier?: boolean;
 }
 
 /** Git status information for a project. */
@@ -727,6 +740,11 @@ export interface ProjectSummary {
   BackgroundTasks?: BackgroundTask[] | null;
   /** How far its work has got, as in ProjectStatus.Progress (issue #545). */
   Progress?: WorkProgress | null;
+  /**
+   * Whether the user has seen its CurrentQuestion (ProjectStatus.QuestionSeen, issue #592): it may still hold
+   * it for a reply to answer, but it waits on the user no more. Left out of the JSON when false.
+   */
+  QuestionSeen?: boolean;
 }
 
 /**
@@ -887,9 +905,19 @@ export interface IProjectHub {
    * AttentionKind.Review, its question in plain text (AttentionKind.Question with no AttentionItem.Question)
    * or its AttentionKind.Error, which leave IProjectHub.GetAttention until there is a new one. Changes no
    * state: a seen question still waits for its reply. Persisted, so it holds after a server restart. A
-   * pending permission or AskUserQuestion is unaffected.
+   * pending permission or AskUserQuestion stays, as only an answer clears it, but is
+   * AttentionItem.Acknowledged.
    */
   MarkSeen(projectId: string): Promise<void>;
+  /**
+   * The user opened the project (issue #592): its view is in front, in a focused window or the app in the
+   * foreground. What its item points at is seen when it is on screen where the user lands, by kind: its last
+   * result (AttentionKind.Finished), its question in plain text, and an AttentionKind.Escalation no turn has
+   * started after, as IProjectHub.MarkSeen sees them; a pending permission or AskUserQuestion is
+   * AttentionItem.Acknowledged. An earlier escalation, an AttentionKind.Error and a AttentionKind.Review,
+   * which the view does not show where the user lands, stay. Changes no state.
+   */
+  MarkOpened(projectId: string): Promise<void>;
   /**
    * Sets how much the project may interrupt the user (issue #438), in its `settings.json`, so every client
    * and voice agree. Its IProjectHubClient.StatusChanged and IProjectHubClient.AttentionChanged follow.

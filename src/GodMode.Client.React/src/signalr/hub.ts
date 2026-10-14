@@ -306,6 +306,14 @@ export class GodModeHub {
     await this.invoke('MarkSeen', projectId);
   }
 
+  /**
+   * The user opened the project (#592): the server settles its item by kind, seeing what is on screen where the user
+   * lands (the last turn, a question in plain text, a latest escalation) and acknowledging a pending request.
+   */
+  async markOpened(projectId: string): Promise<void> {
+    await this.invoke('MarkOpened', projectId);
+  }
+
   /** How much the project may interrupt the user (#438): kept with the session, so every device and voice agree. */
   async setImportance(projectId: string, importance: Importance): Promise<void> {
     await this.invoke('SetImportance', projectId, importance);

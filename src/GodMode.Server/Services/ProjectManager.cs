@@ -1643,6 +1643,17 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         await NotifyStatusChanged(project);
     }
 
+    public async Task MarkOpenedAsync(string projectId)
+    {
+        if (!_projects.TryGetValue(projectId, out var project))
+            throw new KeyNotFoundException($"Project {projectId} not found");
+
+        // Opening a project with nothing to settle writes nothing
+        if (Attention.Opened(project.Status, DateTime.UtcNow) == project.Status) return;
+        await _lifecycle.UpdateStatusAsync(project, status => Attention.Opened(status, DateTime.UtcNow));
+        await NotifyStatusChanged(project);
+    }
+
     public async Task SetImportanceAsync(string projectId, Importance importance)
     {
         if (!_projects.TryGetValue(projectId, out var project))

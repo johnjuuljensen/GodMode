@@ -166,6 +166,13 @@ public record ProjectStatus(
     /// </summary>
     [JsonIgnore]
     public TurnOutcome? EffectiveOutcome => PullRequest?.State == PullRequestState.Merged ? TurnOutcome.Done : Outcome;
+
+    /// <summary>
+    /// Whether the user has seen <see cref="CurrentQuestion"/> (issue #592): <see cref="SeenAt"/> is at or after it was
+    /// asked. The project may still hold it for a reply to answer, but it needs the user no more.
+    /// </summary>
+    [JsonIgnore]
+    public bool QuestionSeen => CurrentQuestion != null && (QuestionAt ?? UpdatedAt) <= (SeenAt ?? DateTime.MinValue);
 }
 
 /// <summary>A turn's end, as <see cref="ProjectStatus.UnseenResult"/> keeps it.</summary>
@@ -179,4 +186,9 @@ public record TurnResult(DateTime At, string? Result, string? Spoken = null, Tur
 /// <param name="At">When it asked.</param>
 /// <param name="Text">What the user is to decide.</param>
 /// <param name="Url">Where to decide it (an issue or a pull request), if it gave one.</param>
-public record Escalation(DateTime At, string Text, string? Url = null);
+/// <param name="Earlier">
+/// Whether a turn has started since it asked (issue #592): it is then above that turn in the output, where the user who
+/// opens the project does not land, so opening the project leaves it. Left out of the JSON when false.
+/// </param>
+public record Escalation(DateTime At, string Text, string? Url = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool Earlier = false);

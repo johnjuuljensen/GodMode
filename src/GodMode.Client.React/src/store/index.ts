@@ -53,9 +53,13 @@ function summaryOf(status: ProjectStatus): ProjectSummary {
     PullRequest: status.PullRequest, Kind: status.Kind,
     ActionName: status.ActionName, SharedFolder: status.SharedFolder, Adopted: status.Adopted,
     ParentId: status.ParentId, Importance: status.Importance, BackgroundTasks: status.BackgroundTasks,
-    Progress: status.Progress,
+    Progress: status.Progress, QuestionSeen: questionSeen(status),
   };
 }
+
+/** Whether the user has seen the project's question in plain text (#592), as the server's ProjectStatus.QuestionSeen says. */
+const questionSeen = (s: ProjectStatus): boolean =>
+  !!s.CurrentQuestion && !!s.SeenAt && Date.parse(s.QuestionAt ?? s.UpdatedAt) <= Date.parse(s.SeenAt);
 
 // ── Transcripts (a project's output, per server) ───────────────
 
@@ -307,6 +311,8 @@ interface AppState {
   /** Shows the inbox on one item: a tapped notification. */
   openInboxItem: (serverId: string, projectId: string) => void;
   markSeen: (serverId: string, projectId: string) => Promise<void>;
+  /** The user opened the project, in a window in front (#592): the server settles its item by kind. */
+  markOpened: (serverId: string, projectId: string) => Promise<void>;
   /** Sets how much the project may interrupt the user (#438); its StatusChanged and AttentionChanged bring it back. */
   setImportance: (serverId: string, projectId: string, importance: Importance) => Promise<void>;
   /** Answers a project whether its claude runs or not (resuming it if needed). */
@@ -393,11 +399,13 @@ function goneKeys(state: AppState, serverId: string, projects: ProjectSummary[])
 }
 
 /**
- * Whether a project waits on the user's answer (WAIT), as its server's status says (#441): WaitingInput, or
- * a question it was stopped on, which it still asks. Never from its live output: the server decides at the
- * turn's end, from the turn's final text, and a turn's narration ending in '?' is no question.
+ * Whether a project waits on the user's answer (WAIT), as its server's status says (#441): an AskUserQuestion, until it
+ * is answered, or a question in plain text it ended its turn on, or was stopped on, until the user has seen it (#592:
+ * it may still hold it for a reply, but waits on the user no more). Never from its live output: the server decides at
+ * the turn's end, from the turn's final text, and a turn's narration ending in '?' is no question.
  */
-export const waitsOnUser = (p: ProjectSummary) => p.State === 'WaitingInput' || (p.State === 'Stopped' && !!p.CurrentQuestion);
+export const waitsOnUser = (p: ProjectSummary) =>
+  !!p.PendingQuestion || (p.State === 'WaitingInput' || p.State === 'Stopped' && !!p.CurrentQuestion) && !p.QuestionSeen;
 
 /** A project added to its server's list (replacing it if listed already), and what is derived from the lists. */
 function listed(state: AppState, serverId: string, project: ProjectSummary): Partial<AppState> {
@@ -1081,6 +1089,9 @@ export const useAppStore = create<AppState>((set, get) => {
   }),
   markSeen: async (serverId, projectId) => {
     await hubFor(serverId).markSeen(projectId);
+  },
+  markOpened: async (serverId, projectId) => {
+    await hubFor(serverId).markOpened(projectId);
   },
   setImportance: async (serverId, projectId, importance) => {
     await hubFor(serverId).setImportance(projectId, importance);

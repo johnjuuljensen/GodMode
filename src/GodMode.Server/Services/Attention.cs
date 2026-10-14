@@ -61,6 +61,8 @@ public static partial class Attention
             _ => null,
         };
         if (found is not ({ } kind, var since, { } text, var spoken, var outcome)) return null;
+        // A pending request the user has looked at (issue #592) is answered, not seen: it stays, and alerts no more
+        var acknowledged = (kind is AttentionKind.Permission || kind is AttentionKind.Question && status.PendingQuestion != null) && since <= seenAt;
 
         return new AttentionItem(status.Id, status.Name, status.ProfileName, status.RootName, kind, since, PlainText(text, out var truncated),
             kind == AttentionKind.Permission ? status.PendingPermission : null,
@@ -75,10 +77,37 @@ public static partial class Attention
             kind == AttentionKind.Error && status.CreateFailed,
             recordedParentId,
             status.Importance,
-            AlertOf(status.Importance, kind),
+            acknowledged ? AttentionAlert.Inbox : AlertOf(status.Importance, kind),
             outcome,
-            truncated);
+            truncated,
+            acknowledged);
     }
+
+    /// <summary>
+    /// What opening the project settles (issue #592, <see cref="Hubs.IProjectHub.MarkOpened"/>): what its item points at
+    /// is on screen where the user lands, the last turn or a pending request, so it is seen; what is above that is not.
+    /// <list type="bullet">
+    /// <item>A <see cref="AttentionKind.Finished"/> or a question in plain text is seen, as <see cref="ProjectStatus.SeenAt"/> moves.</item>
+    /// <item>A pending permission or AskUserQuestion is <see cref="AttentionItem.Acknowledged"/>, as it moves; only an answer clears it.</item>
+    /// <item>An <see cref="AttentionKind.Escalation"/> is cleared when no turn has started since it asked; an
+    /// <see cref="Escalation.Earlier"/> one stays, and what is under it is settled by these rules.</item>
+    /// <item>An <see cref="AttentionKind.Error"/> or a <see cref="AttentionKind.Review"/> stays: the project's view shows
+    /// neither its last error nor the review's request.</item>
+    /// </list>
+    /// </summary>
+    public static ProjectStatus Opened(ProjectStatus status, DateTime now)
+    {
+        var escalation = status.Escalation is { Earlier: true } earlier ? earlier : null;
+        var settles = Of(status with { Escalation = null })?.Kind is { } kind && kind is not (AttentionKind.Error or AttentionKind.Review);
+        return status with { SeenAt = settles ? now : status.SeenAt, Escalation = escalation };
+    }
+
+    /// <summary>
+    /// The escalation it carries marked <see cref="Escalation.Earlier"/>, as a turn starts after it (issue #592); the same
+    /// status when there is none to mark.
+    /// </summary>
+    public static ProjectStatus TurnStarted(ProjectStatus status) =>
+        status.Escalation is { Earlier: false } escalation ? status with { Escalation = escalation with { Earlier = true } } : status;
 
     /// <summary>
     /// How loudly an item of <paramref name="kind"/> from a session of <paramref name="importance"/> is brought to the user
@@ -113,15 +142,15 @@ public static partial class Attention
 
     /// <summary>
     /// Whether two lists say the same: the same projects needing the same, since the same time,
-    /// with the same text, spoken text, request, pull request, importance, alert and outcome. Compared by those, not by record equality, which would
+    /// with the same text, spoken text, request, pull request, importance, alert, outcome and acknowledgement. Compared by those, not by record equality, which would
     /// compare a pending request's input and questions by reference.
     /// </summary>
     public static bool Same(IReadOnlyList<AttentionItem> a, IReadOnlyList<AttentionItem> b) =>
         a.Select(Key).SequenceEqual(b.Select(Key));
 
-    private static (string, AttentionKind, DateTime, string, string?, string?, string?, AttentionAlert, Importance, TurnOutcome?) Key(AttentionItem item) =>
+    private static (string, AttentionKind, DateTime, string, string?, string?, string?, AttentionAlert, Importance, TurnOutcome?, bool) Key(AttentionItem item) =>
         (item.ProjectId, item.Kind, item.Since, item.Text, item.Permission?.RequestId ?? item.Question?.RequestId, item.PullRequestUrl, item.Spoken,
-            item.Alert, item.Importance, item.Outcome);
+            item.Alert, item.Importance, item.Outcome, item.Acknowledged);
 
     /// <summary>
     /// Text to show on a phone or read aloud: code blocks become "(code)", markdown's backticks go,
