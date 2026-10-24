@@ -14,6 +14,7 @@ public partial class ProjectManager
 {
     public async Task<DeleteProjectResult> DeleteChildAsync(string callerId, string projectId)
     {
+        RefuseDeleting(projectId);
         if (!_projects.TryGetValue(projectId, out var project))
             throw new KeyNotFoundException($"Project {projectId} not found");
         if (string.Equals(projectId, callerId, StringComparison.Ordinal))
@@ -22,9 +23,9 @@ public partial class ProjectManager
             throw new InvalidOperationException($"Session {projectId} is not one you started, nor one your children started: a session deletes its own children alone.");
 
         // Checked under the lock the delete takes, so no launch comes between the check and the delete
-        return await WithTrackedLockAsync(project, () => WhyNotDone(project) is { } why
+        return await WhileDeletingAsync(project, () => WithTrackedLockAsync(project, () => WhyNotDone(project) is { } why
             ? throw new InvalidOperationException($"Session {projectId} is not deleted: {why}.")
-            : DeleteLockedAsync(project, force: false));
+            : DeleteLockedAsync(project, force: false)));
     }
 
     /// <summary>Whether <paramref name="ancestorId"/> started the session, or started the session that did, and so on up.</summary>

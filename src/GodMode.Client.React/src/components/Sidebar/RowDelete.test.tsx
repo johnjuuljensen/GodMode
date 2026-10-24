@@ -8,7 +8,7 @@
 import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProjectRootInfo, ProjectState, ProjectSummary } from '../../signalr/types';
-import { FakeHub, connectServers, project } from '../../test/fakeHub';
+import { FakeHub, connectServers, project, status } from '../../test/fakeHub';
 import { render, click, type Rendered } from '../../test/render';
 import { useAppStore } from '../../store';
 import { dismissToast } from '../../toast';
@@ -370,5 +370,27 @@ describe('folding', () => {
 
     await vi.waitFor(() => expect(names()).toEqual(['finished', 'opened']));
     expect(document.querySelector('.project-list-older')).toBeNull();
+  });
+});
+
+describe('a row being deleted (#599)', () => {
+  it('is dimmed, says Deleting… with the script\'s last line, and takes no action until the delete fails', async () => {
+    const notes = session('notes', { state: 'Idle' });
+    await show([notes]);
+    const push = (deleting: boolean) => act(() => hub.callbacks.onStatusChanged?.(notes.Id, { ...status(notes.Id, 'Stopped'), Name: 'notes', UpdatedAt: notes.UpdatedAt, Deleting: deleting }));
+
+    await push(true);
+    await act(() => hub.callbacks.onCreationProgress?.(notes.Id, 'Removing the worktree'));
+
+    expect(row('notes')!.classList).toContain('deleting');
+    expect(row('notes')!.textContent).toContain('Deleting…');
+    expect(row('notes')!.textContent).toContain('Removing the worktree');
+    expect(row('notes')!.querySelector<HTMLButtonElement>('.project-item-menu-btn')!.disabled).toBe(true);
+
+    // Refused by its script: back as it was, its lines gone
+    await push(false);
+    expect(row('notes')!.classList).not.toContain('deleting');
+    expect(row('notes')!.textContent).not.toContain('Removing the worktree');
+    expect(row('notes')!.querySelector<HTMLButtonElement>('.project-item-menu-btn')!.disabled).toBe(false);
   });
 });

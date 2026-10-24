@@ -183,6 +183,10 @@ public interface IProjectHub
     /// to it as <c>GODMODE_FORCE</c>), which may refuse, and then removes its files. A session that
     /// shares its working folder loses only its state, moved to the folder's <c>.godmode/trash/</c>
     /// (<see cref="DeleteProjectResult.Trashed"/>); any other loses its working folder.
+    /// From its start until <see cref="IProjectHubClient.ProjectDeleted"/> the session is <see cref="ProjectStatus.Deleting"/>,
+    /// the script's lines go out as <see cref="IProjectHubClient.CreationProgress"/>, and a second delete is refused as
+    /// already being deleted. Files that would not go once the session had left the list are reported in
+    /// <see cref="DeleteProjectResult.Left"/>, and the delete still succeeds.
     /// </summary>
     Task<DeleteProjectResult> DeleteProject(string projectId, bool force = false);
 

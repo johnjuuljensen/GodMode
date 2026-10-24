@@ -4,6 +4,7 @@ import { createTranscriptBuilder, type TranscriptItem } from '../../signalr/pars
 import { callStatus, callStatusTitle, isConversation, resultLine } from '../Project/transcriptRow';
 import { waitsOnUser } from '../../store';
 import { KindLabel } from '../KindLabel/KindLabel';
+import { DeletingNote } from '../Deleting/Deleting';
 import './ProjectTile.css';
 
 // A tile shows a few lines of a row: text past this is left out of the page, not only out of sight
@@ -11,6 +12,7 @@ const MAX_PREVIEW = 400;
 const preview = (text: string) => (text.length > MAX_PREVIEW ? text.slice(0, MAX_PREVIEW) : text);
 
 interface Props {
+  serverId: string;
   project: ProjectSummary;
   /** Its root as it is shown (#434): the root's title, else its name. */
   rootShown?: string;
@@ -30,7 +32,7 @@ function relativeTime(iso: string): string {
   return `${Math.floor(hrs / 24)}d`;
 }
 
-export function ProjectTile({ project, rootShown, messages, isLoading, isSelected, onSelect }: Props) {
+export function ProjectTile({ serverId, project, rootShown, messages, isLoading, isSelected, onSelect }: Props) {
   const state = project.State;
   const isWaiting = waitsOnUser(project);
   const tileState = isWaiting ? 'WaitingInput' : state;
@@ -41,7 +43,7 @@ export function ProjectTile({ project, rootShown, messages, isLoading, isSelecte
 
   return (
     <button
-      className={`tile tile-state-${tileState} ${isSelected ? 'tile-selected' : ''}`}
+      className={`tile tile-state-${tileState} ${isSelected ? 'tile-selected' : ''} ${project.Deleting ? 'deleting' : ''}`}
       onClick={onSelect}
     >
       {/* Header */}
@@ -57,6 +59,7 @@ export function ProjectTile({ project, rootShown, messages, isLoading, isSelecte
       {project.ProfileName && project.ProfileName !== 'Default' && (
         <div className="tile-profile">{project.ProfileName}{project.RootName ? ` / ${rootShown ?? project.RootName}` : ''}</div>
       )}
+      {project.Deleting && <DeletingNote serverId={serverId} projectId={project.Id} lines={3} />}
 
       {/* Message preview area */}
       <div className="tile-messages">

@@ -55,7 +55,7 @@ const badge = () => [...view!.container.querySelectorAll('.project-item')]
 /** The worker's tile, as the tile view renders it from the store. */
 function Tile() {
   const p = useAppStore(s => s.getConnection('A')!.projects.find(x => x.Id === 'p1')!);
-  return <ProjectTile project={p} messages={[]} isLoading={false} isSelected={false} onSelect={() => {}} />;
+  return <ProjectTile serverId="s1" project={p} messages={[]} isLoading={false} isSelected={false} onSelect={() => {}} />;
 }
 const tileWaits = () => view!.container.querySelector('.tile-waiting-badge') !== null;
 

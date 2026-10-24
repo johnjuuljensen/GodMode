@@ -266,7 +266,7 @@ public class ProjectIdentityTests
 
     /// <summary>
     /// The delete itself refuses a folder that is not inside a known root, whatever the tracked
-    /// project says: the project is forgotten, and its folder left on disk.
+    /// project says: the project is forgotten, and its folder left on disk, which the delete reports (#599).
     /// </summary>
     [Fact]
     public async Task DeleteOfAProjectWhoseFolderIsOutsideTheRoots_IsRefused_AndTheFolderIsLeft()
@@ -277,10 +277,10 @@ public class ProjectIdentityTests
         var marker = WriteMarker(outside);
         harness.Tracked(project.Id).ProjectPath = outside;
 
-        var refused = await Record.ExceptionAsync(() => harness.Projects.DeleteProjectAsync(project.Id));
+        var result = await harness.Projects.DeleteProjectAsync(project.Id);
 
         Assert.True(File.Exists(marker), $"{outside} was deleted with the project");
-        Assert.Contains("not inside a project root", Assert.IsType<InvalidOperationException>(refused).Message);
+        Assert.Contains("not inside a project root", result.Left);
         Assert.Empty(await harness.Projects.ListProjectsAsync());
     }
 

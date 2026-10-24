@@ -36,6 +36,7 @@ namespace GodMode.Shared.Models;
 /// Whether the user has seen its <paramref name="CurrentQuestion"/> (<see cref="ProjectStatus.QuestionSeen"/>, issue #592):
 /// it may still hold it for a reply to answer, but it waits on the user no more. Left out of the JSON when false.
 /// </param>
+/// <param name="Deleting">Whether the session is being deleted, as in <see cref="ProjectStatus.Deleting"/> (issue #599). Left out of the JSON when false.</param>
 public record ProjectSummary(
     string Id,
     string Name,
@@ -62,7 +63,8 @@ public record ProjectSummary(
     DateTime? LastOutputAt = null,
     IReadOnlyList<BackgroundTask>? BackgroundTasks = null,
     WorkProgress? Progress = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool QuestionSeen = false
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool QuestionSeen = false,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool Deleting = false
 )
 {
     /// <summary>
@@ -94,5 +96,6 @@ public record ProjectSummary(
         LastOutputAt: status.LastOutputAt,
         BackgroundTasks: status.BackgroundTasks,
         Progress: status.Progress,
-        QuestionSeen: status.QuestionSeen);
+        QuestionSeen: status.QuestionSeen,
+        Deleting: status.Deleting);
 }

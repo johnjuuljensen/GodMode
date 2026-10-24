@@ -342,6 +342,13 @@ export interface DeleteProjectResult {
    * working folder, which nothing brings back.
    */
   Trashed: boolean;
+  /**
+   * What the delete left on disk (issue #599), when the session had left the list and its folder could not be
+   * removed (a file held open, say) or its state not moved to the trash: what stays, and why. The session is
+   * deleted all the same, and IProjectHubClient.ProjectDeleted is sent. Null when every file went as it
+   * should.
+   */
+  Left?: string | null;
 }
 
 /** A decision an overseer asked the user for: ProjectStatus.Escalation. */
@@ -675,6 +682,15 @@ export interface ProjectStatus {
    * PullRequest: an epic's sub-issues resolved, out of all of them. Null when the script reports none.
    */
   Progress?: WorkProgress | null;
+  /**
+   * Whether the session is being deleted (issue #599): set before its delete stops it and runs its root's
+   * delete script, which may take minutes, and kept until IProjectHubClient.ProjectDeleted, or cleared when
+   * the delete fails and the session stays. A second delete meanwhile is refused as already being deleted.
+   * The app shows the session as going, with the script's IProjectHubClient.CreationProgress, and takes
+   * nothing for it. A server reads it as false: a delete never outlives the server that ran it. Left out of
+   * the JSON when false.
+   */
+  Deleting?: boolean;
 }
 
 /** Summary information about a project. */
@@ -745,6 +761,11 @@ export interface ProjectSummary {
    * it for a reply to answer, but it waits on the user no more. Left out of the JSON when false.
    */
   QuestionSeen?: boolean;
+  /**
+   * Whether the session is being deleted, as in ProjectStatus.Deleting (issue #599). Left out of the JSON
+   * when false.
+   */
+  Deleting?: boolean;
 }
 
 /**
@@ -971,7 +992,10 @@ export interface IProjectHub {
    * Deletes a project: stops it, runs its root's delete script (force is passed to it as `GODMODE_FORCE`),
    * which may refuse, and then removes its files. A session that shares its working folder loses only its
    * state, moved to the folder's `.godmode/trash/` (DeleteProjectResult.Trashed); any other loses its working
-   * folder.
+   * folder. From its start until IProjectHubClient.ProjectDeleted the session is ProjectStatus.Deleting, the
+   * script's lines go out as IProjectHubClient.CreationProgress, and a second delete is refused as already
+   * being deleted. Files that would not go once the session had left the list are reported in
+   * DeleteProjectResult.Left, and the delete still succeeds.
    */
   DeleteProject(projectId: string, force?: boolean): Promise<DeleteProjectResult>;
   /**
