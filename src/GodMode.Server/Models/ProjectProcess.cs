@@ -169,6 +169,17 @@ public sealed class ProjectProcess
     /// <summary>The ask <see cref="TryAskRecap"/> took sent nothing: a later one may.</summary>
     public void UnaskRecap() => Volatile.Write(ref _recapAsked, 0);
 
+    private Services.RateLimitInfo? _rejection;
+
+    /// <summary>
+    /// The account's rate limit refused claude's request (issue #596): a <c>rate_limit_event</c> rejection, which the turn's
+    /// error result follows. Set on the consumer as the line is handled; the next result takes it (<see cref="TakeRejection"/>).
+    /// </summary>
+    public void Rejected(Services.RateLimitInfo info) => Volatile.Write(ref _rejection, info);
+
+    /// <summary>The rejection the result ending now follows (<see cref="Rejected"/>), if any; clears it.</summary>
+    public Services.RateLimitInfo? TakeRejection() => Interlocked.Exchange(ref _rejection, null);
+
     private Compaction? _compaction;
 
     /// <summary>

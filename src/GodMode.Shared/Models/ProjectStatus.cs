@@ -128,6 +128,19 @@ namespace GodMode.Shared.Models;
 /// it is open or needs the user. Nothing else changes: its claude, its attention items and its pull request carry on.
 /// Left out of the JSON when false.
 /// </param>
+/// <param name="RateLimited">
+/// The account's rate limit holds the session (issue #596): its turn was stopped by a <c>rate_limit_event</c> rejection
+/// (<see cref="RateLimitHold.Stopped"/>), or what was sent to it, or its create's prompt, waits for the limit to reset
+/// (<see cref="RateLimitHold.Held"/>). The server sends it on at <see cref="RateLimitHold.Until"/>, plus a margin, and
+/// clears it; a stop by the user clears it, and nothing is sent. Kept in status.json, so a restart keeps the schedule.
+/// The app shows the session as limited until then. Null when no limit holds it.
+/// </param>
+/// <param name="AccountNotice">
+/// What one session tells of its account's rate limit (issue #596), for all the sessions under it: the session whose
+/// rejection marked the account limited carries it, so the user hears of the limit once per account, not once per
+/// session. Its hit ("Kappe hit its five-hour limit; resumes at 15:50"), then its reset. An
+/// <see cref="AttentionKind.RateLimited"/> item while it is newer than the session's last result and the user has not seen it.
+/// </param>
 public record ProjectStatus(
     string Id,
     string Name,
@@ -172,7 +185,9 @@ public record ProjectStatus(
     IReadOnlyList<BackgroundTask>? BackgroundTasks = null,
     WorkProgress? Progress = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool Deleting = false,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool Hidden = false
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool Hidden = false,
+    RateLimitHold? RateLimited = null,
+    AccountNotice? AccountNotice = null
 )
 {
     /// <summary>
@@ -196,6 +211,24 @@ public record ProjectStatus(
 /// <param name="Spoken">Its spoken reply, as <see cref="ProjectStatus.SpokenSummary"/> had it.</param>
 /// <param name="Outcome">How the session said it ended, as <see cref="ProjectStatus.Outcome"/> had it.</param>
 public record TurnResult(DateTime At, string? Result, string? Spoken = null, TurnOutcome? Outcome = null);
+
+/// <summary>What the account's rate limit holds of a session (issue #596): <see cref="ProjectStatus.RateLimited"/>.</summary>
+/// <param name="Until">When the limit resets: the rejection's <c>resetsAt</c>. The server sends the session on after it.</param>
+/// <param name="Window">Which limit it is, as claude's <c>rateLimitType</c> names it (<c>five_hour</c>, <c>seven_day</c>, …); null when it named none.</param>
+/// <param name="Since">When it was held: the rejection, or the first input held.</param>
+/// <param name="Stopped">
+/// Whether the limit stopped the session's turn: it is sent a continuation at the reset, when nothing of the user's is
+/// <paramref name="Held"/>. Left out of the JSON when false.
+/// </param>
+/// <param name="Held">The user's input, or its create's prompt, held for the reset, sent then in place of the continuation; null when none.</param>
+public record RateLimitHold(DateTime Until, string? Window, DateTime Since,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool Stopped = false,
+    string? Held = null);
+
+/// <summary>What a session tells of its account's rate limit: <see cref="ProjectStatus.AccountNotice"/>.</summary>
+/// <param name="At">When: the limit was hit, or reset.</param>
+/// <param name="Text">What to show or say, e.g. "Kappe hit its five-hour limit; resumes at 15:50".</param>
+public record AccountNotice(DateTime At, string Text);
 
 /// <summary>A decision an overseer asked the user for: <see cref="ProjectStatus.Escalation"/>.</summary>
 /// <param name="At">When it asked.</param>

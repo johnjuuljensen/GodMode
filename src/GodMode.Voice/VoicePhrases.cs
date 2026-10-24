@@ -109,6 +109,8 @@ public sealed partial class VoicePhrases
         (var who, AttentionKind.Finished, false) when item.Outcome == TurnOutcome.Done => $"{who} is done",
         (var who, AttentionKind.Finished, true) => $"{who} er idle",
         (var who, AttentionKind.Finished, false) => $"{who} is idle",
+        // The account's limit, not the session's (#596): the server's own line, which names the account and the reset
+        (_, AttentionKind.RateLimited, _) => item.Text.TrimEnd('.'),
     };
 
     /// <summary>

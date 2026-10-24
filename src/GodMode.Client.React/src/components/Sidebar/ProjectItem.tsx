@@ -8,6 +8,7 @@ import { ImportanceMark } from '../Importance/Importance';
 import { IMPORTANCE_LABELS, IMPORTANCE_ORDER } from '../Importance/importanceTiers';
 import { BackgroundBadge } from '../BackgroundTasks/BackgroundTasks';
 import { ProgressMark } from '../Progress/Progress';
+import { RateLimitMark } from '../RateLimit/RateLimit';
 import { backgroundName, inBackground } from '../BackgroundTasks/backgroundState';
 import type { ProjectState } from '../../signalr/types';
 
@@ -170,6 +171,7 @@ export function ProjectItem({ item, isSelected, onSelect, nested }: Props) {
             <KindLabel kind={project.Kind} />
             {hidden && <span className="project-hidden-mark" title="Hidden: it stays under older">hidden</span>}
             <BackgroundBadge tasks={project.BackgroundTasks} />
+            <RateLimitMark hold={project.RateLimited} />
             {ownRoot && <span className="project-own-root" title={`In ${ownRoot}`}>{ownRoot}</span>}
           </div>
           {deleting ? <DeletingNote serverId={item.serverId} projectId={project.Id} /> : <div className="project-meta">

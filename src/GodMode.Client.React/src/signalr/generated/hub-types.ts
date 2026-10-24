@@ -56,7 +56,14 @@ export type AttentionKind =
    * Stopped. Cleared by IProjectHub.MarkSeen and by any reply. A quiet turn's end raises none
    * (ProjectStatus.QuietResult).
    */
-  | 'Finished';
+  | 'Finished'
+  /**
+   * The account's rate limit stopped its sessions, or has reset (issue #596): one item per account, on the
+   * session that tells of it (ProjectStatus.AccountNotice), not one per session it stopped. The server
+   * resumes them itself at the reset; nothing needs an answer. Cleared by IProjectHub.MarkSeen, and by the
+   * session's next result.
+   */
+  | 'RateLimited';
 
 /**
  * How much a session may interrupt the user (issue #438), least first: its `settings.json`'s `importance`,
@@ -153,6 +160,14 @@ export type TurnOutcome =
   | 'continuing'
   /** It cannot go on, and says why: the session waits on the user, a AttentionKind.Question. */
   | 'blocked';
+
+/** What a session tells of its account's rate limit: ProjectStatus.AccountNotice. */
+export interface AccountNotice {
+  /** When: the limit was hit, or reset. */
+  At: string;
+  /** What to show or say, e.g. "Kappe hit its five-hour limit; resumes at 15:50". */
+  Text: string;
+}
 
 /** Request to add or update a GodMode server registration. */
 export interface AddServerRequest {
@@ -698,6 +713,22 @@ export interface ProjectStatus {
    * on. Left out of the JSON when false.
    */
   Hidden?: boolean;
+  /**
+   * The account's rate limit holds the session (issue #596): its turn was stopped by a `rate_limit_event`
+   * rejection (RateLimitHold.Stopped), or what was sent to it, or its create's prompt, waits for the limit to
+   * reset (RateLimitHold.Held). The server sends it on at RateLimitHold.Until, plus a margin, and clears it;
+   * a stop by the user clears it, and nothing is sent. Kept in status.json, so a restart keeps the schedule.
+   * The app shows the session as limited until then. Null when no limit holds it.
+   */
+  RateLimited?: RateLimitHold | null;
+  /**
+   * What one session tells of its account's rate limit (issue #596), for all the sessions under it: the
+   * session whose rejection marked the account limited carries it, so the user hears of the limit once per
+   * account, not once per session. Its hit ("Kappe hit its five-hour limit; resumes at 15:50"), then its
+   * reset. An AttentionKind.RateLimited item while it is newer than the session's last result and the user
+   * has not seen it.
+   */
+  AccountNotice?: AccountNotice | null;
 }
 
 /** Summary information about a project. */
@@ -778,6 +809,8 @@ export interface ProjectSummary {
    * false.
    */
   Hidden?: boolean;
+  /** What its account's rate limit holds of it, as in ProjectStatus.RateLimited (issue #596). */
+  RateLimited?: RateLimitHold | null;
 }
 
 /**
@@ -813,6 +846,29 @@ export interface QuestionItem {
 export interface QuestionOption {
   Label: string;
   Description?: string | null;
+}
+
+/** What the account's rate limit holds of a session (issue #596): ProjectStatus.RateLimited. */
+export interface RateLimitHold {
+  /** When the limit resets: the rejection's `resetsAt`. The server sends the session on after it. */
+  Until: string;
+  /**
+   * Which limit it is, as claude's `rateLimitType` names it (`five_hour`, `seven_day`, …); null when it named
+   * none.
+   */
+  Window?: string | null;
+  /** When it was held: the rejection, or the first input held. */
+  Since: string;
+  /**
+   * Whether the limit stopped the session's turn: it is sent a continuation at the reset, when nothing of the
+   * user's is Held. Left out of the JSON when false.
+   */
+  Stopped?: boolean;
+  /**
+   * The user's input, or its create's prompt, held for the reset, sent then in place of the continuation;
+   * null when none.
+   */
+  Held?: string | null;
 }
 
 /** Represents information about a host provider (e.g., Docker container, Codespace). */

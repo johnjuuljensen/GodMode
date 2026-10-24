@@ -43,6 +43,10 @@ public static partial class Attention
             // the status keeps it until then, and SeenAt, which the fleet's send and a resume move too, is not asked
             { Escalation: { } escalation } =>
                 (AttentionKind.Escalation, escalation.At, escalation.Text, null, null),
+            // The account's rate limit, hit or reset, told once for all its sessions (issue #596): until it is seen, or the
+            // session's next result is newer
+            { AccountNotice: { } notice } when notice.At > seenAt && !(status.LastResultAt > notice.At) =>
+                (AttentionKind.RateLimited, notice.At, notice.Text, null, null),
             { State: ProjectState.Idle or ProjectState.Stopped, PullRequest: { IsOpen: true, Review: PullRequestReview.ChangesRequested } pr }
                 when pr.ChangedAt > seenAt =>
                 (AttentionKind.Review, pr.ChangedAt, $"Changes requested on pull request #{pr.Number}.", null, null),
@@ -112,12 +116,14 @@ public static partial class Attention
     /// <summary>
     /// How loudly an item of <paramref name="kind"/> from a session of <paramref name="importance"/> is brought to the user
     /// (issue #438): an important session's interrupts, a normal one's notifies, and a quiet one's is in the inbox alone,
-    /// but what blocks it (a permission prompt, a question, an escalation), which notifies as a normal one's does.
+    /// but what blocks it (a permission prompt, a question, an escalation), which notifies as a normal one's does, and its
+    /// account's rate limit (issue #596), which is not the session's alone.
     /// </summary>
     public static AttentionAlert AlertOf(Importance importance, AttentionKind kind) => importance switch
     {
         Importance.Important => AttentionAlert.Interrupt,
-        Importance.Quiet when kind is not (AttentionKind.Permission or AttentionKind.Question or AttentionKind.Escalation) => AttentionAlert.Inbox,
+        Importance.Quiet when kind is not (AttentionKind.Permission or AttentionKind.Question or AttentionKind.Escalation or AttentionKind.RateLimited)
+            => AttentionAlert.Inbox,
         _ => AttentionAlert.Notify,
     };
 
