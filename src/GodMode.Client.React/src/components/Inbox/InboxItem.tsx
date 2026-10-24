@@ -15,6 +15,7 @@ const KIND_LABELS: Record<AttentionKind, string> = {
   Escalation: 'Decision',
   Review: 'Changes requested',
   Finished: 'Finished',
+  RateLimited: 'Rate limit',
 };
 
 /**
@@ -41,7 +42,7 @@ const isShortCard =(item: Pick<ServerAttentionItem, 'Kind' | 'Text' | 'Truncated
 /** Kinds answered with a typed reply (ReplyAndResume). */
 const REPLY_KINDS: ReadonlySet<AttentionKind> = new Set(['Question', 'Error', 'Escalation', 'Finished']);
 /** Kinds to mark seen: a Question only in plain text, as a pending AskUserQuestion is answered (#426). */
-const SEEN_KINDS: ReadonlySet<AttentionKind> = new Set(['Finished', 'Review', 'Question', 'Error', 'Escalation']);
+const SEEN_KINDS: ReadonlySet<AttentionKind> = new Set(['Finished', 'Review', 'Question', 'Error', 'Escalation', 'RateLimited']);
 
 interface Props {
   item: ServerAttentionItem;

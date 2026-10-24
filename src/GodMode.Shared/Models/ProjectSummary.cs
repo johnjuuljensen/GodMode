@@ -38,6 +38,7 @@ namespace GodMode.Shared.Models;
 /// </param>
 /// <param name="Deleting">Whether the session is being deleted, as in <see cref="ProjectStatus.Deleting"/> (issue #599). Left out of the JSON when false.</param>
 /// <param name="Hidden">Whether the user hid the session, as in <see cref="ProjectStatus.Hidden"/> (issue #598). Left out of the JSON when false.</param>
+/// <param name="RateLimited">What its account's rate limit holds of it, as in <see cref="ProjectStatus.RateLimited"/> (issue #596).</param>
 public record ProjectSummary(
     string Id,
     string Name,
@@ -66,7 +67,8 @@ public record ProjectSummary(
     WorkProgress? Progress = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool QuestionSeen = false,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool Deleting = false,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool Hidden = false
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool Hidden = false,
+    RateLimitHold? RateLimited = null
 )
 {
     /// <summary>
@@ -100,5 +102,6 @@ public record ProjectSummary(
         Progress: status.Progress,
         QuestionSeen: status.QuestionSeen,
         Deleting: status.Deleting,
-        Hidden: status.Hidden);
+        Hidden: status.Hidden,
+        RateLimited: status.RateLimited);
 }
