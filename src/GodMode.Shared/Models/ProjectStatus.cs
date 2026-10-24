@@ -115,6 +115,13 @@ namespace GodMode.Shared.Models;
 /// the session with no process; not by a <c>/clear</c>, which they outlive. The app shows an idle session with them as
 /// working in the background.
 /// </param>
+/// <param name="Deleting">
+/// Whether the session is being deleted (issue #599): set before its delete stops it and runs its root's delete script,
+/// which may take minutes, and kept until <see cref="Hubs.IProjectHubClient.ProjectDeleted"/>, or cleared when the delete
+/// fails and the session stays. A second delete meanwhile is refused as already being deleted. The app shows the session
+/// as going, with the script's <see cref="Hubs.IProjectHubClient.CreationProgress"/>, and takes nothing for it. A server
+/// reads it as false: a delete never outlives the server that ran it. Left out of the JSON when false.
+/// </param>
 public record ProjectStatus(
     string Id,
     string Name,
@@ -157,7 +164,8 @@ public record ProjectStatus(
     TurnOutcome? Outcome = null,
     DateTime? LastOutputAt = null,
     IReadOnlyList<BackgroundTask>? BackgroundTasks = null,
-    WorkProgress? Progress = null
+    WorkProgress? Progress = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool Deleting = false
 )
 {
     /// <summary>

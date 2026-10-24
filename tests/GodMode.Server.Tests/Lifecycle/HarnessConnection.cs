@@ -48,6 +48,9 @@ internal sealed class HarnessConnection
     public Task<ProjectStatus> AdoptFolderAsync(string profileName, string rootName, string path, string? actionName, Dictionary<string, JsonElement>? inputs) =>
         Hub().AdoptFolder(profileName, rootName, path, actionName, inputs);
 
+    /// <summary>Deletes as the app's Delete does, through the hub, which announces it (ProjectDeleted).</summary>
+    public Task<DeleteProjectResult> DeleteProjectAsync(string projectId, bool force = false) => Hub().DeleteProject(projectId, force);
+
     /// <summary>Forgets as the app's Forget does, through the hub, which announces it (ProjectDeleted).</summary>
     public Task<DeleteProjectResult> ForgetProjectAsync(string projectId) => Hub().ForgetProject(projectId);
 

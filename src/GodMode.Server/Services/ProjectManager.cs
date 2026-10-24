@@ -60,6 +60,8 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
     private readonly IHubContext<ProjectHub, IProjectHubClient> _hubContext;
     private readonly ILogger<ProjectManager> _logger;
     private readonly ConcurrentDictionary<string, ProjectInfo> _projects = new();
+    /// <summary>The sessions being deleted, by ID, from before their delete waits for a launch until it returns (issue #599).</summary>
+    private readonly ConcurrentDictionary<string, ProjectInfo> _deleting = new();
     private readonly IServer? _server;
     private readonly string[] _configuredUrls;
 
@@ -1938,12 +1940,51 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
 
     public async Task<DeleteProjectResult> DeleteProjectAsync(string projectId, bool force = false)
     {
+        RefuseDeleting(projectId);
         if (!_projects.TryGetValue(projectId, out var project))
         {
             throw new KeyNotFoundException($"Project {projectId} not found");
         }
 
-        return await WithTrackedLockAsync(project, () => DeleteLockedAsync(project, force));
+        return await WhileDeletingAsync(project, () => WithTrackedLockAsync(project, () => DeleteLockedAsync(project, force)));
+    }
+
+    /// <summary>
+    /// Refuses, changing nothing, a delete or a forget of a session being deleted (issue #599): it may already have left
+    /// the list, which would read as not found.
+    /// </summary>
+    private void RefuseDeleting(string projectId)
+    {
+        if (_deleting.ContainsKey(projectId))
+            throw new InvalidOperationException($"Project {projectId} is already being deleted.");
+    }
+
+    /// <summary>
+    /// Runs <paramref name="delete"/> with the session shown as being deleted (<see cref="ProjectStatus.Deleting"/>), to
+    /// every client at once, before it waits for a launch or runs a script; a second delete meanwhile is refused. A delete
+    /// that fails and leaves the session tracked shows it as it was again.
+    /// </summary>
+    private async Task<DeleteProjectResult> WhileDeletingAsync(ProjectInfo project, Func<Task<DeleteProjectResult>> delete)
+    {
+        var projectId = project.Status.Id;
+        if (!_deleting.TryAdd(projectId, project))
+            throw new InvalidOperationException($"Project {projectId} is already being deleted.");
+        try
+        {
+            await _lifecycle.UpdateStatusAsync(project, status => status with { Deleting = true });
+            await NotifyStatusChanged(project);
+            return await delete();
+        }
+        catch when (IsTracked(project))
+        {
+            await _lifecycle.UpdateStatusAsync(project, status => status with { Deleting = false });
+            await NotifyStatusChanged(project);
+            throw;
+        }
+        finally
+        {
+            _deleting.TryRemove(projectId, out _);
+        }
     }
 
     private async Task<DeleteProjectResult> DeleteLockedAsync(ProjectInfo project, bool force)
@@ -2036,7 +2077,8 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
             throw;
         }
 
-        // Remove from tracking, and finish its output and any check a push started since
+        // Remove from tracking, and finish its output and any check a push started since. From here on it is deleted,
+        // whatever its files do: a removal that fails says what it left, and the session still leaves the list
         _projects.TryRemove(projectId, out _);
         ForgetFleetGrant(project, setAside: true);
         await project.Process.CloseAsync();
@@ -2048,20 +2090,32 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         // handle locked/read-only files (common with .git directories on Windows after git init or
         // process shutdown)
         var trashed = false;
+        string? left = null;
         var folderGoes = !sharedFolder
             || (project.MadeSharedFolder && !inTheRoot && !othersInFolder && !Directory.Exists(project.StatePath) && !IsClaimedByCreate(project.ProjectPath)
                 && ProjectFiles.SessionState.ListTrashed(project.ProjectPath).Count == 0 && HoldsNothingButGodMode(project.ProjectPath));
-        if (folderGoes)
-            await DeleteDirectoryRobustAsync(project.ProjectPath, WhyNotAProjectFolderOf(project.RootPath, project.ProjectPath));
-        else
-            trashed = await TrashSessionStateAsync(project);
+        try
+        {
+            if (folderGoes)
+                await DeleteDirectoryRobustAsync(project.ProjectPath, WhyNotAProjectFolderOf(project.RootPath, project.ProjectPath));
+            else
+                trashed = await TrashSessionStateAsync(project);
+        }
+        catch (Exception ex)
+        {
+            left = folderGoes
+                ? $"Its folder '{project.ProjectPath}' could not be removed, and what is left of it stays on disk: {ex.Message}"
+                : $"Its state '{project.StatePath}' could not be moved to the trash, and stays on disk: {ex.Message}";
+            _logger.LogError(ex, "Project {ProjectId} left the list, but its files did not all go: {Left}", projectId, left);
+        }
         // Its record is kept only for a restore of its state from the trash
         if (!trashed) ForgetFleetGrant(project, setAside: false);
 
-        _logger.LogInformation("Project {ProjectId} deleted successfully{Kept}", projectId,
-            folderGoes ? "" : $"; its working folder {project.ProjectPath} is shared, and stays{(trashed ? ", with its state in the trash" : "")}");
+        if (left == null)
+            _logger.LogInformation("Project {ProjectId} deleted successfully{Kept}", projectId,
+                folderGoes ? "" : $"; its working folder {project.ProjectPath} is shared, and stays{(trashed ? ", with its state in the trash" : "")}");
         await PushAttentionIfChangedAsync();
-        return new DeleteProjectResult(trashed);
+        return new DeleteProjectResult(trashed, left);
     }
 
     /// <summary>
@@ -2796,8 +2850,9 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
 
             // Check if state needs to be corrected (was running when server stopped)
             var stateChanged = status.State is ProjectState.Running or ProjectState.WaitingInput or ProjectState.WaitingPermission;
-            // A permission prompt ended with the process that asked: its call to the MCP endpoint failed with the server
-            status = status with { PendingPermission = null, PendingQuestion = null };
+            // A permission prompt ended with the process that asked: its call to the MCP endpoint failed with the server,
+            // and a delete with the server that ran it: one a crash cut short left the session as it was
+            status = status with { PendingPermission = null, PendingQuestion = null, Deleting = false };
             // status.json is the project folder's, which its session can write: a pull request
             // link is kept only if it is one the status script's output could have set
             if (status.PullRequest is { } pr && !PullRequestScript.IsValidUrl(pr.Url))

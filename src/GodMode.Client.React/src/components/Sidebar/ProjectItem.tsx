@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useAppStore, waitsOnUser, type SidebarItem } from '../../store';
 import { KindLabel } from '../KindLabel/KindLabel';
 import { deleteSession } from '../../deleteSession';
+import { DeletingNote } from '../Deleting/Deleting';
 import { ImportanceMark } from '../Importance/Importance';
 import { IMPORTANCE_LABELS, IMPORTANCE_ORDER } from '../Importance/importanceTiers';
 import { BackgroundBadge } from '../BackgroundTasks/BackgroundTasks';
@@ -57,6 +58,8 @@ export function ProjectItem({ item, isSelected, onSelect, nested }: Props) {
   const [revealed, setRevealed] = useState(false);
   const [dragging, setDragging] = useState(false);
   const touch = useRef<{ x: number; y: number; swiping: boolean; from: number } | null>(null);
+  // Being deleted (#599): no menu, no swipe, and nothing on it but opening it
+  const deleting = project.Deleting === true;
 
   // A menu closes on a click or tap outside it, and on Escape
   useEffect(() => {
@@ -88,6 +91,7 @@ export function ProjectItem({ item, isSelected, onSelect, nested }: Props) {
   });
 
   const onTouchStart = (e: React.TouchEvent) => {
+    if (deleting) return;
     const t = e.touches[0];
     touch.current = { x: t.clientX, y: t.clientY, swiping: false, from: revealed ? -SWIPE_REVEAL_PX : 0 };
   };
@@ -130,10 +134,10 @@ export function ProjectItem({ item, isSelected, onSelect, nested }: Props) {
         </button>
       )}
       <div
-        className={`project-item ${isSelected ? 'selected' : ''} ${isWaiting ? 'waiting' : ''} ${menu ? 'menu-open' : ''} ${offset ? 'swiped' : ''} ${dragging ? 'dragging' : ''}`}
+        className={`project-item ${isSelected ? 'selected' : ''} ${isWaiting ? 'waiting' : ''} ${menu ? 'menu-open' : ''} ${offset ? 'swiped' : ''} ${dragging ? 'dragging' : ''} ${deleting ? 'deleting' : ''}`}
         style={offset ? { transform: `translateX(${offset}px)` } : undefined}
         onClick={onRowClick}
-        onContextMenu={e => { e.preventDefault(); openMenuAt(e.clientX, e.clientY); }}
+        onContextMenu={e => { e.preventDefault(); if (!deleting) openMenuAt(e.clientX, e.clientY); }}
         onTouchStart={onTouchStart}
         onTouchMove={onTouchMove}
         onTouchEnd={onTouchEnd}
@@ -161,7 +165,7 @@ export function ProjectItem({ item, isSelected, onSelect, nested }: Props) {
             <BackgroundBadge tasks={project.BackgroundTasks} />
             {ownRoot && <span className="project-own-root" title={`In ${ownRoot}`}>{ownRoot}</span>}
           </div>
-          <div className="project-meta">
+          {deleting ? <DeletingNote serverId={item.serverId} projectId={project.Id} /> : <div className="project-meta">
             {serverLabel && `${serverLabel} · `}{project.RootName && `${item.rootShown ?? project.RootName} · `}{timeAgo}
             {startedBy && <span className="project-started-by">{' · started by '}{startedBy}</span>}
             {isWaiting && project.CurrentQuestion && (
@@ -171,7 +175,7 @@ export function ProjectItem({ item, isSelected, onSelect, nested }: Props) {
                   : project.CurrentQuestion}
               </span>
             )}
-          </div>
+          </div>}
         </div>
         {/* How far its work has got (#545), folded or not; folded, how many are under it and whether any needs the user */}
         {(nested?.collapsed || project.Progress) && (
@@ -187,6 +191,7 @@ export function ProjectItem({ item, isSelected, onSelect, nested }: Props) {
             title="More"
             aria-label={`More for ${project.Name}`}
             aria-haspopup="menu"
+            disabled={deleting}
             onClick={e => {
               e.stopPropagation();
               const box = e.currentTarget.getBoundingClientRect();
@@ -196,7 +201,7 @@ export function ProjectItem({ item, isSelected, onSelect, nested }: Props) {
         )}
       </div>
       {/* Out of the sidebar: its backdrop-filter makes it the containing block of a fixed menu, and its overflow clips it */}
-      {menu && createPortal(
+      {menu && !deleting && createPortal(
         <div ref={menuRef} className="project-item-menu" role="menu" style={{ left: menu.x, top: menu.y }} onClick={e => e.stopPropagation()}>
           {IMPORTANCE_ORDER.map(tier => (
             <button

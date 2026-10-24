@@ -433,11 +433,11 @@ public class RootWorkspaceTests
         Assert.Contains(harness.Warnings, line => line.Contains("Could not purge") && line.Contains("link"));
 
         if (linkAt == ".godmode") return;
-        // A delete moves the state of a session in the root into the trash only where it seems
+        // A delete moves the state of a session in the root into the trash only where it seems, and says what it left (#599)
         var created = await harness.CreateProjectAsync("chat");
         await harness.WaitForStdinAsync(created.Id);
-        var refused = await Assert.ThrowsAsync<InvalidOperationException>(() => harness.Projects.DeleteProjectAsync(created.Id));
-        Assert.Contains("link", refused.Message);
+        var result = await harness.Projects.DeleteProjectAsync(created.Id);
+        Assert.Contains("link", result.Left);
         Assert.False(Directory.Exists(Path.Combine(outside, IdOf(created.Id))), "the delete moved the state outside the root");
         Assert.True(Directory.Exists(harness.StatePath(created.Id)), "the state left its place");
     }

@@ -26,6 +26,9 @@ export {
 } from './hierarchy';
 
 /** The map without the keys given; the same object when it has none of them. */
+/** How many of a delete script's last lines are held (#599). */
+export const DELETE_PROGRESS_LINES = 20;
+
 function without<T>(map: Record<ProjectKey, T>, keys: ReadonlySet<ProjectKey>): Record<ProjectKey, T> {
   const gone = (Object.keys(map) as ProjectKey[]).filter(k => keys.has(k));
   if (gone.length === 0) return map;
@@ -336,6 +339,11 @@ interface AppState {
    */
   composerDrafts: Record<ProjectKey, string>;
   setComposerDraft: (serverId: string, projectId: string, text: string) => void;
+  /**
+   * The delete script's lines (its CreationProgress), by ProjectKey, for a session being deleted (#599), the last
+   * {@link DELETE_PROGRESS_LINES} of them: until it leaves the list, or its delete fails and it is no longer Deleting.
+   */
+  deleteProgress: Record<ProjectKey, string[]>;
 
   // Tile view
   isTileView: boolean;
@@ -380,6 +388,7 @@ function forgotten(state: AppState, keys: ReadonlySet<ProjectKey>): Partial<AppS
   return {
     transcripts, collapsedSessions, inboxDrafts: without(state.inboxDrafts, keys),
     composerDrafts: without(state.composerDrafts, keys),
+    deleteProgress: without(state.deleteProgress, keys),
     pendingSends: without(state.pendingSends, keys),
     tiles: without(state.tiles, keys), tileMessages: without(state.tileMessages, keys), tileLoading: without(state.tileLoading, keys),
     ...(sel && keys.has(projectKey(sel.serverId, sel.projectId)) ? { outputMessages: [] } : {}),
@@ -873,13 +882,19 @@ export const useAppStore = create<AppState>((set, get) => {
                       PendingPermission: status.PendingPermission, PendingQuestion: status.PendingQuestion,
                       PullRequest: status.PullRequest, ParentId: status.ParentId, SlashCommands: status.SlashCommands,
                       Importance: status.Importance, BackgroundTasks: status.BackgroundTasks, Progress: status.Progress,
+                      Deleting: status.Deleting,
                     }
                   : p) }
               : c
           );
           const { profileGroups, inactiveServers, profileFilterOptions } = rebuildHierarchy(connections, state.profileFilter, state.sidebarGroupBy);
 
-          return { serverConnections: connections, profileGroups, inactiveServers, profileFilterOptions, ...notTaken };
+          // A delete that failed: the session is back as it was, and its script's lines go
+          const deleteFailed = !status.Deleting && state.deleteProgress[key]
+            ? { deleteProgress: without(state.deleteProgress, new Set([key])) }
+            : {};
+
+          return { serverConnections: connections, profileGroups, inactiveServers, profileFilterOptions, ...notTaken, ...deleteFailed };
         });
       },
       // A live line only counts once its subscription's replay is complete: one broadcast before
@@ -939,7 +954,13 @@ export const useAppStore = create<AppState>((set, get) => {
           return updates;
         });
       },
-      onCreationProgress: () => {},
+      // A delete script's lines, while its session is being deleted (#599); a create's are not shown
+      onCreationProgress: (projectId, message) => set(state => {
+        const key = projectKey(serverId, projectId);
+        if (!state.getConnection(serverId)?.projects.some(p => p.Id === projectId && p.Deleting)) return {};
+        const lines = [...(state.deleteProgress[key] ?? []), message].slice(-DELETE_PROGRESS_LINES);
+        return { deleteProgress: { ...state.deleteProgress, [key]: lines } };
+      }),
     });
 
     try {
@@ -1125,6 +1146,7 @@ export const useAppStore = create<AppState>((set, get) => {
     else delete inboxDrafts[key];
     return { inboxDrafts };
   }),
+  deleteProgress: {},
   composerDrafts: {},
   setComposerDraft: (serverId, projectId, text) => set(state => {
     const key = projectKey(serverId, projectId);

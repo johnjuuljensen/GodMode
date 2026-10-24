@@ -60,9 +60,10 @@ export async function deleteSession(serverId: string, project: ProjectSummary): 
 async function runDelete(serverId: string, project: ProjectSummary, force: boolean): Promise<boolean> {
   const hub = useAppStore.getState().serverConnections.find(c => c.serverInfo.Id === serverId)?.hub;
   let trashed: boolean;
+  let left: string | null | undefined;
   try {
     if (!hub) throw new Error('its server is not connected');
-    trashed = (await hub.deleteProject(project.Id, force)).Trashed;
+    ({ Trashed: trashed, Left: left } = await hub.deleteProject(project.Id, force));
   } catch (err) {
     const reason = hubErrorMessage(err);
     showToast(force
@@ -75,7 +76,10 @@ async function runDelete(serverId: string, project: ProjectSummary, force: boole
   const selected = useAppStore.getState().selectedProject;
   if (selected?.serverId === serverId && selected.projectId === project.Id) useAppStore.getState().clearSelection();
 
-  showToast(trashed
+  // Deleted, but not every file went (#599): what stays on disk is the user's to clear
+  showToast(left
+    ? { text: `Deleted "${project.Name}", but: ${left}`, tone: 'error' }
+    : trashed
     ? { text: `Deleted "${project.Name}"`, action: { label: 'Undo', run: () => restoreSession(serverId, project) } }
     : { text: `Deleted "${project.Name}" and its folder` });
   return true;

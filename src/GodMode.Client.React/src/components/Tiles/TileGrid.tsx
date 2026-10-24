@@ -64,6 +64,7 @@ export function TileGrid() {
         {allProjects.map(({ serverId, project, roots }) => (
           <ProjectTile
             key={projectKey(serverId, project.Id)}
+            serverId={serverId}
             project={project}
             rootShown={project.RootName ? rootShown(roots, project.ProfileName, project.RootName) : undefined}
             messages={tileMessages[projectKey(serverId, project.Id)] ?? []}

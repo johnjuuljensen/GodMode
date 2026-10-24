@@ -1,0 +1,41 @@
+/* A session being deleted (#599): its row, tile or view is dimmed, and says so with the delete script's last lines */
+.deleting {
+  opacity: 0.55;
+}
+
+.deleting-note {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.deleting-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--state-error);
+}
+
+.deleting-spinner {
+  box-sizing: border-box;
+  width: 9px;
+  height: 9px;
+  border-radius: var(--radius-round);
+  border: 1.5px solid currentColor;
+  border-right-color: transparent;
+  animation: deleting-turn 1s linear var(--loop-iterations);
+}
+
+@keyframes deleting-turn {
+  to { transform: rotate(360deg); }
+}
+
+.deleting-line {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+}

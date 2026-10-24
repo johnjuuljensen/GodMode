@@ -9,6 +9,7 @@ import { hubErrorMessage } from '../../signalr/hubError';
 import { isConversation } from './transcriptRow';
 import { confirmAction } from '../../confirmDialog';
 import { deleteSession } from '../../deleteSession';
+import { DeletingNote } from '../Deleting/Deleting';
 import { useClickToCompose } from './clickToCompose';
 import { focusOnOpen } from './focusOnOpen';
 import './ProjectView.css';
@@ -59,6 +60,8 @@ export function ProjectView({ serverId, projectId }: Props) {
   // elsewhere, or while this client slept), or a link to one it does not have. Nothing here acts on it (#239)
   const projectsListed = useAppStore(s => !!s.projectsListed[serverId]);
   const notFound = conn?.connectionState === 'connected' && projectsListed && !project;
+  // Being deleted (#599): it is read, not acted on, until it leaves the list or its delete fails
+  const deleting = project?.Deleting === true;
 
   useEffect(() => {
     // Resumes from the transcript held, so reopening only adds what is new. Open while it shows: the
@@ -212,7 +215,7 @@ export function ProjectView({ serverId, projectId }: Props) {
           )}
         </div>
         <div className="project-header-actions">
-          {project && <ImportancePicker serverId={serverId} projectId={projectId} importance={project.Importance} />}
+          {project && !deleting && <ImportancePicker serverId={serverId} projectId={projectId} importance={project.Importance} />}
           <button
             className={`btn btn-toggle ${simpleView ? 'active' : ''}`}
             onClick={toggleSimpleView}
@@ -222,8 +225,8 @@ export function ProjectView({ serverId, projectId }: Props) {
           </button>
           <button
             className={`project-status-btn ${background ? 'Running Background' : state}`}
-            onClick={canStop ? handleStop : canResume ? handleResume : undefined}
-            disabled={!canStop && !canResume}
+            onClick={deleting ? undefined : canStop ? handleStop : canResume ? handleResume : undefined}
+            disabled={deleting || !canStop && !canResume}
             title={background ? `${backgroundTitle(project.BackgroundTasks!)}
 Click to stop` : canStop ? 'Click to stop' : canResume ? 'Click to resume' : state}
           >
@@ -231,16 +234,22 @@ Click to stop` : canStop ? 'Click to stop' : canResume ? 'Click to resume' : sta
             <span className="project-status-label">
               {notFound ? 'Not found' : background ? `Background · ${project.BackgroundTasks!.length}` : state}
             </span>
-            {canStop && <span className="project-status-action">Stop</span>}
-            {canResume && <span className="project-status-action">Resume</span>}
+            {canStop && !deleting && <span className="project-status-action">Stop</span>}
+            {canResume && !deleting && <span className="project-status-action">Resume</span>}
           </button>
-          <button className="delete-btn" onClick={handleDelete} disabled={notFound || !project} title={project?.SharedFolder ? 'Delete (undo for a few seconds)' : 'Delete permanently'}>
+          <button className="delete-btn" onClick={handleDelete} disabled={notFound || !project || deleting} title={project?.SharedFolder ? 'Delete (undo for a few seconds)' : 'Delete permanently'}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
             </svg>
           </button>
         </div>
       </div>
+
+      {deleting && (
+        <div className="project-deleting deleting">
+          <DeletingNote serverId={serverId} projectId={projectId} lines={10} />
+        </div>
+      )}
 
       {!notFound && phase === 'ready' && shownItems.length > 0 ? (
         <TranscriptList ref={transcriptRef} key={transcriptKey(serverId, projectId)} items={shownItems} {...clickToCompose} />
@@ -283,10 +292,10 @@ Click to stop` : canStop ? 'Click to stop' : canResume ? 'Click to resume' : sta
           // too, as the inbox answers an Error item (#240)
           placeholder={awaitsFirstMessage ? 'Type the first message...'
             : canResume || state === 'Error' || state === 'Idle' && !background ? 'Type to resume...' : 'Type your response...'}
-          disabled={notFound}
+          disabled={notFound || deleting}
           commands={project?.SlashCommands}
         />
-        <button className="btn btn-primary" onClick={handleSendInput} disabled={notFound || !inputText.trim()}>
+        <button className="btn btn-primary" onClick={handleSendInput} disabled={notFound || deleting || !inputText.trim()}>
           Send
         </button>
       </div>

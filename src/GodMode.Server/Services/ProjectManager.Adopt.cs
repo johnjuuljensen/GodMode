@@ -305,6 +305,7 @@ public partial class ProjectManager
 
     public async Task<DeleteProjectResult> ForgetProjectAsync(string projectId)
     {
+        RefuseDeleting(projectId);
         if (!_projects.TryGetValue(projectId, out var project))
             throw new KeyNotFoundException($"Project {projectId} not found");
 
