@@ -1677,6 +1677,24 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         await NotifyStatusChanged(project);
     }
 
+    public async Task SetHiddenAsync(string projectId, bool hidden)
+    {
+        if (!_projects.TryGetValue(projectId, out var project))
+            throw new KeyNotFoundException($"Project {projectId} not found");
+        if (project.Status.CreateFailed)
+            throw new InvalidOperationException($"Project {projectId} failed before its launch, and has no settings to keep its hiding in.");
+
+        // As SetImportanceAsync: settings.json is what a recovery reads, and one that cannot be read is not replaced
+        if (!ProjectFiles.ProjectSettings.TryLoad(project.StatePath, out var settings))
+            throw new InvalidOperationException($"Project {projectId} has no settings.json that can be read, so its hiding cannot be kept: see the server log.");
+
+        _logger.LogInformation("Project {ProjectId} is now {Visibility}", projectId, hidden ? "hidden" : "shown");
+        if (settings.Hidden != hidden)
+            (settings with { Hidden = hidden }).Save(project.StatePath);
+        await _lifecycle.UpdateStatusAsync(project, status => status with { Hidden = hidden });
+        await NotifyStatusChanged(project);
+    }
+
     /// <summary>
     /// The user writes to the project (the hub's SendInput, ReplyAndResume or AnswerQuestion): the turn that takes it is the
     /// user's (<see cref="ProjectProcess.MarkUserTurn"/>), the user has taken over from a compaction the session asked for
@@ -2890,7 +2908,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
             var fromSettings = status with
             {
                 ActionName = settings.ActionName, SharedFolder = sharedFolder, Adopted = settings.Adopted, Importance = settings.Importance,
-                BackgroundTasks = null,
+                Hidden = settings.Hidden, BackgroundTasks = null,
             };
             var correctedStatus = stateChanged
                 ? fromSettings with { Id = id, Kind = kind, State = ProjectState.Stopped, UpdatedAt = DateTime.UtcNow, RootName = rootName, ProfileName = profileName, OutputOffset = outputOffset }

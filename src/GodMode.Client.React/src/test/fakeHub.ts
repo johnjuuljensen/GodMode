@@ -179,6 +179,14 @@ export class FakeHub {
     const summary = this.projects.find(p => p.Id === projectId);
     if (summary) this.callbacks.onStatusChanged?.(projectId, { ...status(projectId, summary.State), Name: summary.Name, Importance: importance });
   }
+  /** Every SetHidden, in order. The server pushes the project's status with it, as ProjectManager does. */
+  hiddens: { projectId: string; hidden: boolean }[] = [];
+  async setHidden(projectId: string, hidden: boolean) {
+    this.invoke();
+    this.hiddens.push({ projectId, hidden });
+    const summary = this.projects.find(p => p.Id === projectId);
+    if (summary) this.callbacks.onStatusChanged?.(projectId, { ...status(projectId, summary.State), Name: summary.Name, Hidden: hidden });
+  }
   /** Every StopProject, in order. The server pushes the project's status, Stopped, as ProjectManager does. */
   stops: string[] = [];
   async stopProject(projectId: string) {

@@ -56,7 +56,7 @@ function summaryOf(status: ProjectStatus): ProjectSummary {
     PullRequest: status.PullRequest, Kind: status.Kind,
     ActionName: status.ActionName, SharedFolder: status.SharedFolder, Adopted: status.Adopted,
     ParentId: status.ParentId, Importance: status.Importance, BackgroundTasks: status.BackgroundTasks,
-    Progress: status.Progress, QuestionSeen: questionSeen(status),
+    Progress: status.Progress, QuestionSeen: questionSeen(status), Hidden: status.Hidden,
   };
 }
 
@@ -318,6 +318,8 @@ interface AppState {
   markOpened: (serverId: string, projectId: string) => Promise<void>;
   /** Sets how much the project may interrupt the user (#438); its StatusChanged and AttentionChanged bring it back. */
   setImportance: (serverId: string, projectId: string, importance: Importance) => Promise<void>;
+  /** Hides the project from the list, or shows it again (#598); its StatusChanged brings it back. */
+  setHidden: (serverId: string, projectId: string, hidden: boolean) => Promise<void>;
   /** Answers a project whether its claude runs or not (resuming it if needed). */
   replyAndResume: (serverId: string, projectId: string, text: string) => Promise<void>;
   /**
@@ -882,7 +884,7 @@ export const useAppStore = create<AppState>((set, get) => {
                       PendingPermission: status.PendingPermission, PendingQuestion: status.PendingQuestion,
                       PullRequest: status.PullRequest, ParentId: status.ParentId, SlashCommands: status.SlashCommands,
                       Importance: status.Importance, BackgroundTasks: status.BackgroundTasks, Progress: status.Progress,
-                      Deleting: status.Deleting,
+                      Deleting: status.Deleting, Hidden: status.Hidden,
                     }
                   : p) }
               : c
@@ -1116,6 +1118,9 @@ export const useAppStore = create<AppState>((set, get) => {
   },
   setImportance: async (serverId, projectId, importance) => {
     await hubFor(serverId).setImportance(projectId, importance);
+  },
+  setHidden: async (serverId, projectId, hidden) => {
+    await hubFor(serverId).setHidden(projectId, hidden);
   },
   replyAndResume: async (serverId, projectId, text) => {
     await hubFor(serverId).replyAndResume(projectId, text);

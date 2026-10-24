@@ -251,6 +251,35 @@ describe('folding older sessions (#325) with what they started', () => {
   });
 });
 
+describe('folding hidden sessions (#598)', () => {
+  const now = new Date('2026-10-01T12:00:00Z').getTime();
+  const recent = '2026-10-01T11:00:00Z';
+  const hide = (p: ProjectSummary): ProjectSummary => ({ ...p, Hidden: true });
+  const items = (projects: ProjectSummary[]) =>
+    rebuildHierarchy([server('A', [rootOf('work', 'P')], projects)], 'All', 'root').profileGroups[0].rootGroups[0].items;
+  const names = ({ shown, older }: { shown: SidebarItem[]; older: SidebarItem[] }) =>
+    [shown.map(i => i.project.Name), older.map(i => i.project.Name)];
+
+  it('folds a hidden live session under older, whatever its age', () => {
+    const list = items([hide(projectOf('worker', 'P', 'work', 'Running', recent)), projectOf('other', 'P', 'work', 'Running', recent)]);
+    expect(names(foldItems(list, now, () => false))).toEqual([['other'], ['worker']]);
+  });
+
+  it('keeps a hidden session shown while it is open or needs the user', () => {
+    const list = items([hide(projectOf('worker', 'P', 'work', 'WaitingPermission', recent))]);
+    expect(names(foldItems(list, now, () => true))).toEqual([['worker'], []]);
+  });
+
+  it("takes a hidden parent's live children with it, unless one of them is kept", () => {
+    const list = items([
+      hide(projectOf('overseer', 'P', 'work', 'Idle', recent)),
+      childOf('P/work/overseer', 'worker', 'P', 'work', 'Running', recent),
+    ]);
+    expect(names(foldItems(list, now, () => false))).toEqual([[], ['overseer']]);
+    expect(names(foldItems(list, now, i => i.project.Name === 'worker'))).toEqual([['overseer'], []]);
+  });
+});
+
 describe('the order of a parent by what it started (#397)', () => {
   /** A stopped, old parent with a running, recent child; an idle session between them in time. */
   const family = () => server('A', [rootOf('work', 'P')], [

@@ -122,6 +122,12 @@ namespace GodMode.Shared.Models;
 /// as going, with the script's <see cref="Hubs.IProjectHubClient.CreationProgress"/>, and takes nothing for it. A server
 /// reads it as false: a delete never outlives the server that ran it. Left out of the JSON when false.
 /// </param>
+/// <param name="Hidden">
+/// Whether the user hid the session (issue #598): its <c>settings.json</c>'s, not status.json's, set by
+/// <see cref="Hubs.IProjectHub.SetHidden"/>. The app folds it under its group's older sessions whatever its state, unless
+/// it is open or needs the user. Nothing else changes: its claude, its attention items and its pull request carry on.
+/// Left out of the JSON when false.
+/// </param>
 public record ProjectStatus(
     string Id,
     string Name,
@@ -165,7 +171,8 @@ public record ProjectStatus(
     DateTime? LastOutputAt = null,
     IReadOnlyList<BackgroundTask>? BackgroundTasks = null,
     WorkProgress? Progress = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool Deleting = false
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool Deleting = false,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool Hidden = false
 )
 {
     /// <summary>

@@ -143,6 +143,19 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         }
     }
 
+    public async Task SetHidden(string projectId, bool hidden)
+    {
+        _logger.LogInformation("Client {ConnectionId} sets project {ProjectId} hidden {Hidden}", Context.ConnectionId, projectId, hidden);
+        try
+        {
+            await _projectManager.SetHiddenAsync(projectId, hidden);
+        }
+        catch (Exception ex) when (ex is KeyNotFoundException or InvalidOperationException)
+        {
+            throw new HubException(ex.Message);
+        }
+    }
+
     public Task ReplyAndResume(string projectId, string text) => ReplyAsync(projectId, text, spoken: false);
 
     public Task ReplyByVoice(string projectId, string text) => ReplyAsync(projectId, text, spoken: true);

@@ -79,7 +79,7 @@ describe('a row', () => {
     expect(tiers().map(b => [b.textContent, b.getAttribute('aria-checked')])).toEqual([
       ['Quiet', 'false'], ['✓ Normal', 'true'], ['Important', 'false'],
     ]);
-    expect(q('.project-item-menu [role=menuitem]').map(b => b.textContent)).toEqual(['Delete…']);
+    expect(q('.project-item-menu [role=menuitem]').map(b => b.textContent)).toEqual(['Hide', 'Delete…']);
   });
 
   it('sets the tier on the server, and stars the row when the server pushes it back', async () => {
