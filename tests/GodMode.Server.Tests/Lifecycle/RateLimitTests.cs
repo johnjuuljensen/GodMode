@@ -77,7 +77,9 @@ public class RateLimitTests
     [Fact]
     public async Task AStopByTheUser_CancelsTheResume()
     {
-        await using var harness = new LifecycleHarness(StoppedThenCarriesOn(In(TimeSpan.FromSeconds(2))), settings: NoMargin);
+        // Far enough off for the stop to come first on a loaded machine, and waited past below
+        var resetsAt = In(TimeSpan.FromSeconds(8));
+        await using var harness = new LifecycleHarness(StoppedThenCarriesOn(resetsAt), settings: NoMargin);
         var created = await harness.CreateProjectAsync();
         await WaitForLimitedAsync(harness, created.Id);
 
@@ -85,7 +87,7 @@ public class RateLimitTests
         Assert.Null((await harness.Projects.GetStatusAsync(created.Id)).RateLimited);
         Assert.Null(harness.ReadStatusFile(created.Id).RateLimited);
 
-        await Task.Delay(TimeSpan.FromSeconds(4));
+        await Task.Delay(resetsAt - DateTimeOffset.UtcNow + TimeSpan.FromSeconds(2));
         Assert.Single(harness.Launches(created.Id));
         Assert.Single(harness.Launches(created.Id)[0].Stdin);
         Assert.Equal(ProjectState.Stopped, (await harness.Projects.GetStatusAsync(created.Id)).State);

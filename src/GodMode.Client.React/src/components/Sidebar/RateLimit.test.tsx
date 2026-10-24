@@ -10,7 +10,7 @@ import { FakeHub, connectServers, project, root, status } from '../../test/fakeH
 import { render, type Rendered } from '../../test/render';
 import { useAppStore } from '../../store';
 import { Sidebar } from './Sidebar';
-import { resetTime } from '../RateLimit/RateLimit';
+import { resetTime } from '../RateLimit/resetTime';
 
 vi.mock('../../signalr/hub', () => ({ GodModeHub: class {} }));
 vi.mock('../../services/hostApi', () => ({

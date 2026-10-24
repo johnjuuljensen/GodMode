@@ -1,12 +1,6 @@
 import type { RateLimitHold } from '../../signalr/types';
+import { resetTime } from './resetTime';
 import './RateLimit.css';
-
-/** The reset as the row says it: "15:50" today, "Mon 15:50" on another day. */
-export function resetTime(until: string, now: Date = new Date()): string {
-  const at = new Date(until);
-  const time = `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`;
-  return at.toDateString() === now.toDateString() ? time : `${at.toLocaleDateString([], { weekday: 'short' })} ${time}`;
-}
 
 /**
  * A session its account's rate limit holds (#596): "limited until 15:50". The server sends it on then, with what the
