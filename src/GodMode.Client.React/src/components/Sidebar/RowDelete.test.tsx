@@ -94,7 +94,7 @@ describe('a row', () => {
     expect(document.querySelector('.project-item-menu')).toBeNull();
 
     await openMenu('notes');
-    expect(q('.project-item-menu [role=menuitem]').map(b => b.textContent)).toEqual(['Delete']);
+    expect(q('.project-item-menu [role=menuitem]').map(b => b.textContent)).toEqual(['Hide', 'Delete']);
     expect(hub.deletes).toEqual([]);
   });
 
@@ -105,7 +105,7 @@ describe('a row', () => {
     await act(async () => { row('notes')!.dispatchEvent(event); });
 
     expect(event.defaultPrevented).toBe(true);
-    expect(q('.project-item-menu [role=menuitem]').map(b => b.textContent)).toEqual(['Delete']);
+    expect(q('.project-item-menu [role=menuitem]').map(b => b.textContent)).toEqual(['Hide', 'Delete']);
     expect(useAppStore.getState().selectedProject).toBeNull();
   });
   it('opens its menu outside the sidebar, which clips a fixed menu, and on the screen near its edge', async () => {
@@ -257,7 +257,7 @@ describe('a worktree delete', () => {
     await show([session('left-list', { kind: 'feat' })]);
 
     await openMenu('left-list');
-    expect(q('.project-item-menu [role=menuitem]').map(b => b.textContent)).toEqual(['Delete…']);
+    expect(q('.project-item-menu [role=menuitem]').map(b => b.textContent)).toEqual(['Hide', 'Delete…']);
     await click(buttonIn(document.querySelector('.project-item-menu'), 'Delete…')!);
 
     await vi.waitFor(() => expect(dialog()).not.toBeNull());
