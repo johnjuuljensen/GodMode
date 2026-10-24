@@ -41,7 +41,9 @@ Not one line. The moment you do, you have a working tree, a merge conflict and a
 full of somebody else's file — and you stop being able to see the fleet. Everything you want changed
 is dispatched, including a failing gate on your own epic branch.
 
-Reviewing, merging, reading and writing GitHub are yours. Editing is not.
+Reviewing, merging, reading and writing GitHub are yours. Editing is not. A catch-up merge of
+`origin/master` that merges clean and keeps the gate green is a merge, not an edit
+([The epic branch](#the-epic-branch)); one that conflicts or reddens the gate is dispatched.
 
 ## One protocol, either tier
 
@@ -434,6 +436,12 @@ is hard to reverse. `master` is the opposite on both counts — every push to it
   when the parent merges and its branch is deleted. Rely on it; do not pre-empt it.
 - Merge `origin/master` into the epic branch on a schedule. An epic that runs for days while other
   work lands on `master` otherwise ends as one enormous conflict, presented at the worst moment.
+  **A clean catch-up merge is yours**, in your epic worktree: `git fetch`, `git merge origin/master`
+  with a merge commit, the full gate on the merged tree, then push. You already trial-merge and run
+  the gate there; this is one more step on the same tree, and it edits no code. It needs no session,
+  branch or pull request. **On a conflict, or a red gate after the merge,** `git merge --abort` (or
+  `git reset --hard origin/<epic>`, back to the pushed epic branch) and dispatch a worker for the
+  merge, as for any other change.
 - **A clean textual merge is not a green gate.** `mergeable: MERGEABLE` means git found no
   overlapping lines; it says nothing about two independently-correct branches that change what the
   same downstream test or snapshot observes. That failure is invisible in either pull request, and
