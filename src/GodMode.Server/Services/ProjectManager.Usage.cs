@@ -38,7 +38,7 @@ public partial class ProjectManager
     {
         if (ceiling == null || _lifecycle.AccountLimits.UsageOf(account) is not { } usage) return null;
         var now = DateTime.UtcNow;
-        return Over(AccountLimits.FiveHourWindow, usage.FiveHour, ceiling.FiveHour) ?? Over(AccountLimits.SevenDayWindow, usage.SevenDay, ceiling.SevenDay);
+        return Over(AccountLimits.SessionWindow, usage.Session, ceiling.Session) ?? Over(AccountLimits.WeeklyWindow, usage.Weekly, ceiling.Weekly);
 
         string? Over(string name, UsageWindow? window, double? limit) =>
             window is { } reading && limit is { } most && reading.Utilization >= most && !(reading.ResetsAt <= now)

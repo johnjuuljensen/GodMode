@@ -272,7 +272,7 @@ When resolving an action, `config.json` (base) is merged with `config.{action}.j
 | `session` | Whether the action starts a session. Default `true`. `false`: its scripts run, and nothing more, as a provisioning action does. See [Actions that start no session](#actions-that-start-no-session) |
 | `resumeOnRestart` | Whether a project that was active when the server stopped carries on when it starts again. Default `true`: see [Resuming after a restart](#resuming-after-a-restart) |
 | `resumePrompt` | What a project that was working when the server stopped is told when it is resumed. Default `"The GodMode server restarted and interrupted you. Continue where you left off."` |
-| `usageCeiling` | The root's usage ceiling per window (`config.json` only), `{ "fiveHour": 0.7, "sevenDay": 0.85 }`: while its account's reading of a window is at or above it, the root starts and resumes no session. Over its profile's, window by window. See [Usage, and a usage ceiling](#usage-and-a-usage-ceiling) |
+| `usageCeiling` | The root's usage ceiling per window (`config.json` only), `{ "session": 0.7, "weekly": 0.85 }`: while its account's reading of a window is at or above it, the root starts and resumes no session. Over its profile's, window by window. See [Usage, and a usage ceiling](#usage-and-a-usage-ceiling) |
 | `stripEnvVarProfile` | If true (`config.json` only), server env vars prefixed with the profile name reach sessions without the prefix: `MEGA_GITHUB_TOKEN` → `GITHUB_TOKEN` for profile `mega` |
 
 Script fields accept either a single string or a string array in JSON. Paths are relative to `.godmode-root/`.
@@ -808,24 +808,24 @@ macOS has no `setsid`: claude stays in the server's process group, nothing is re
 
 ### Usage, and a usage ceiling
 
-Every turn's stream-json carries a `rate_limit_event` with its account's usage windows (`unifiedWindows`). The server keeps the newest reading of each account's five-hour (`five_hour`) and weekly (`seven_day`) window, from whichever of its sessions wrote it (issue #600). An account is a Claude config dir: the session's `CLAUDE_CONFIG_DIR`, from its root's `environment` over its profile's, else the server's own, else `~/.claude`. Roots and profiles on one account share its reading; a root whose `environment` names another config dir than its profile's has that account's.
+Every turn's stream-json carries a `rate_limit_event` with its account's usage windows (`unifiedWindows`). The server keeps the newest reading of each account's session (claude's `five_hour`) and weekly (`seven_day`) window, from whichever of its sessions wrote it (issue #600). GodMode names the windows as Claude Code's usage screen does ("Current session", "Current week"), not by their lengths, which Anthropic may change (issue #607). An account is a Claude config dir: the session's `CLAUDE_CONFIG_DIR`, from its root's `environment` over its profile's, else the server's own, else `~/.claude`. Roots and profiles on one account share its reading; a root whose `environment` names another config dir than its profile's has that account's.
 
-- **Clients get the readings** with `GetUsage()` (one `AccountUsage` per account: `Account`, `Name`, `FiveHour` and `SevenDay`, each a `Utilization` from 0 to 1 and its `ResetsAt`, and `ObservedAt`), and `UsageChanged(usage)` pushes the whole list whenever a window changes. Each `ProjectRootInfo` and `ProfileInfo` names its account's key (`Account`, a hash of the config dir's path, so no path leaves the server; per server) and its `UsageCeiling`.
+- **Clients get the readings** with `GetUsage()` (one `AccountUsage` per account: `Account`, `Name`, `Session` and `Weekly`, each a `Utilization` from 0 to 1 and its `ResetsAt`, and `ObservedAt`), and `UsageChanged(usage)` pushes the whole list whenever a window changes. Each `ProjectRootInfo` and `ProfileInfo` names its account's key (`Account`, a hash of the config dir's path, so no path leaves the server; per server) and its `UsageCeiling`.
 - **A reading is only as fresh as the account's last turn.** An idle account keeps its last reading, an upper bound, and a window whose `ResetsAt` has passed has reset: the app shows it empty, and it holds nothing. The readings are kept in memory: after a restart an account has none until its next turn.
 
 A root or a profile can set a ceiling per window, a fraction (`0.7`) or a percentage (`70`):
 
 ```jsonc
 // .godmode-root/config.json: the root's, whatever action a session is of
-{ "usageCeiling": { "fiveHour": 0.7, "sevenDay": 0.85 } }
+{ "usageCeiling": { "session": 0.7, "weekly": 0.85 } }
 ```
 
 ```jsonc
 // The instance's config file: the profile's, for every root of it
-{ "Profiles": { "Private": { "UsageCeiling": { "FiveHour": 0.7, "SevenDay": 0.85 } } } }
+{ "Profiles": { "Private": { "UsageCeiling": { "Session": 0.7, "Weekly": 0.85 } } } }
 ```
 
-A root's ceiling wins over its profile's, window by window: a root that sets only `fiveHour` takes its profile's `sevenDay`. While the account's last reading of a window is at or above the root's ceiling for it, and the window has not reset since, the root **holds its work**: `CreateProject` and the fleet's `start_session` start no session in it, and `ResumeProject` and `ReplyAndResume` (the fleet's `send`) resume no stopped session, each refused with why ("Root 'godmode' holds its work: its account (.claude-work) is at 82% of its five-hour limit, over its ceiling of 70%; the window resets at 15:50"). Nothing is queued: the work starts when it is asked for again, once the window has reset or a reading has dropped below the ceiling. Sessions whose claude runs are left alone, a reply to them included, as are an action that starts no session and the server's own resume of a session a rate limit stopped. An account with no reading yet holds nothing.
+A root's ceiling wins over its profile's, window by window: a root that sets only `session` takes its profile's `weekly`. While the account's last reading of a window is at or above the root's ceiling for it, and the window has not reset since, the root **holds its work**: `CreateProject` and the fleet's `start_session` start no session in it, and `ResumeProject` and `ReplyAndResume` (the fleet's `send`) resume no stopped session, each refused with why ("Root 'godmode' holds its work: its account (.claude-work) is at 82% of its five-hour limit, over its ceiling of 70%; the window resets at 15:50"). Nothing is queued: the work starts when it is asked for again, once the window has reset or a reading has dropped below the ceiling. Sessions whose claude runs are left alone, a reply to them included, as are an action that starts no session and the server's own resume of a session a rate limit stopped. An account with no reading yet holds nothing.
 
 ### When Something Fails
 
@@ -1004,7 +1004,7 @@ Roots and profiles:
 - `Task<ProjectRootInfo[]> ListProjectRoots()` — Get roots with their actions and input schemas, and each root's `Title` when it has one
 - `Task<IssueInfo?> DescribeIssue(profileName, projectRootName, issue)` — The issue's `Title` and `Labels` from the root's `issueInfo` script, run now; null when the root has none; fails, saying why, as [Issue Info](#issue-info) says
 - `Task<ProfileInfo[]> ListProfiles()` — Get profiles (read-only: no hub method writes a profile or a root)
-- `Task<AccountUsage[]> GetUsage()` — Each account's last five-hour and weekly reading; roots and profiles name theirs by `Account` ([Usage, and a usage ceiling](#usage-and-a-usage-ceiling))
+- `Task<AccountUsage[]> GetUsage()` — Each account's last session and weekly reading; roots and profiles name theirs by `Account` ([Usage, and a usage ceiling](#usage-and-a-usage-ceiling))
 
 ### Server → Client Events
 

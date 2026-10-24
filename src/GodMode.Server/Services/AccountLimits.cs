@@ -81,10 +81,10 @@ public sealed class AccountLimits
     private sealed record Account(Limit? Limit, RateLimitInfo? Last, bool ResetTold = false, Usage? Usage = null);
 
     /// <summary>An account's usage windows as last reported (issue #600), each kept until a report names it again, and when.</summary>
-    private sealed record Usage(UsageWindow? FiveHour, UsageWindow? SevenDay, DateTime ObservedAt);
+    private sealed record Usage(UsageWindow? Session, UsageWindow? Weekly, DateTime ObservedAt);
 
-    /// <summary>The <c>unifiedWindows</c> names of the windows the usage readings keep.</summary>
-    public const string FiveHourWindow = "five_hour", SevenDayWindow = "seven_day";
+    /// <summary>The <c>unifiedWindows</c> names of the windows the usage readings keep: the session's and the week's, as claude names them.</summary>
+    public const string SessionWindow = "five_hour", WeeklyWindow = "seven_day";
 
     private readonly ConcurrentDictionary<string, Account> _accounts =
         new(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
@@ -142,7 +142,7 @@ public sealed class AccountLimits
     /// </summary>
     public AccountUsage? UsageOf(string account) =>
         _accounts.TryGetValue(account, out var known) && known.Usage is { } usage
-            ? new AccountUsage(KeyOf(account), NameOf(account), usage.FiveHour, usage.SevenDay, usage.ObservedAt)
+            ? new AccountUsage(KeyOf(account), NameOf(account), usage.Session, usage.Weekly, usage.ObservedAt)
             : null;
 
     /// <summary>The usage of every account a session has reported a window of.</summary>
@@ -156,8 +156,8 @@ public sealed class AccountLimits
     public bool ChangesUsage(string account, RateLimitInfo info)
     {
         var kept = _accounts.TryGetValue(account, out var known) ? known.Usage : null;
-        return WindowOf(info, FiveHourWindow) is { } fiveHour && fiveHour != kept?.FiveHour
-            || WindowOf(info, SevenDayWindow) is { } sevenDay && sevenDay != kept?.SevenDay;
+        return WindowOf(info, SessionWindow) is { } session && session != kept?.Session
+            || WindowOf(info, WeeklyWindow) is { } weekly && weekly != kept?.Weekly;
     }
 
     /// <summary>
@@ -174,10 +174,10 @@ public sealed class AccountLimits
 
     /// <summary>The kept usage with the windows <paramref name="info"/> reports over it; the kept usage when it reports none.</summary>
     private static Usage? UsageOf(Usage? kept, RateLimitInfo info, DateTime now) =>
-        (WindowOf(info, FiveHourWindow), WindowOf(info, SevenDayWindow)) switch
+        (WindowOf(info, SessionWindow), WindowOf(info, WeeklyWindow)) switch
         {
             (null, null) => kept,
-            var (fiveHour, sevenDay) => new Usage(fiveHour ?? kept?.FiveHour, sevenDay ?? kept?.SevenDay, now),
+            var (session, weekly) => new Usage(session ?? kept?.Session, weekly ?? kept?.Weekly, now),
         };
 
     private static UsageWindow? WindowOf(RateLimitInfo info, string name) =>
