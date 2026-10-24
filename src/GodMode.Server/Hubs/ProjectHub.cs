@@ -37,6 +37,8 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         return await _projectManager.ListProjectRootsAsync();
     }
 
+    public Task<AccountUsage[]> GetUsage() => Task.FromResult(_projectManager.GetUsage());
+
     public async Task<ProjectSummary[]> ListProjects()
     {
         _logger.LogInformation("Client {ConnectionId} requested project list", Context.ConnectionId);

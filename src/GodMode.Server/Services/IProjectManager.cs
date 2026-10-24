@@ -19,6 +19,9 @@ public interface IProjectManager
     /// </summary>
     Task<ProjectRootInfo[]> ListProjectRootsAsync();
 
+    /// <summary>The usage of every account the server's sessions have reported on (issue #600): the hub's <c>GetUsage</c>.</summary>
+    AccountUsage[] GetUsage();
+
     /// <summary>
     /// Lists all projects across all project roots.
     /// </summary>

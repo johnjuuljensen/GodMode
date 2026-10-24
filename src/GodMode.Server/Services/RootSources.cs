@@ -1,3 +1,5 @@
+using GodMode.Shared.Models;
+
 namespace GodMode.Server.Services;
 
 /// <summary>
@@ -7,7 +9,7 @@ namespace GodMode.Server.Services;
 /// <list type="bullet">
 /// <item><c>Roots:Scan:&lt;key&gt; = &lt;folder&gt;</c>: each immediate subfolder with <c>.godmode-root/</c> is a root, named after it.</item>
 /// <item><c>Roots:Explicit:&lt;name&gt;:Path = &lt;folder&gt;</c>, optionally <c>:Profile</c> and <c>:Title</c>: the folder is the root <c>&lt;name&gt;</c>.</item>
-/// <item><c>Profiles:&lt;name&gt;:Description</c>, and <c>Profiles:&lt;name&gt;:Environment:&lt;VAR&gt; = &lt;value&gt;</c>.</item>
+/// <item><c>Profiles:&lt;name&gt;:Description</c>, <c>Profiles:&lt;name&gt;:Environment:&lt;VAR&gt; = &lt;value&gt;</c>, and <c>Profiles:&lt;name&gt;:UsageCeiling</c>.</item>
 /// </list>
 /// An entry with an empty folder is none, so a later source can turn off one an earlier source set.
 /// Relative folders resolve against the working directory.
@@ -20,6 +22,8 @@ public sealed record RootSources(
     public const string ScanSection = "Roots:Scan";
     public const string ExplicitSection = "Roots:Explicit";
     public const string ProfilesSection = "Profiles";
+    /// <summary>A profile's usage ceiling (issue #600), <c>Profiles:&lt;name&gt;:UsageCeiling:FiveHour</c> and <c>:SevenDay</c>.</summary>
+    public const string CeilingSection = "UsageCeiling";
 
     /// <summary>The server's root sources in <paramref name="config"/>: scan folders and explicit roots in ordinal order of their keys.</summary>
     public static RootSources From(IConfiguration config) => new(
@@ -41,7 +45,8 @@ public sealed record RootSources(
                 profile["Description"] is { Length: > 0 } description ? description : null,
                 profile.GetSection("Environment").GetChildren()
                     .Where(variable => variable.Value != null)
-                    .ToDictionary(variable => variable.Key, variable => variable.Value!)),
+                    .ToDictionary(variable => variable.Key, variable => variable.Value!),
+                UsageCeiling.Of(profile.GetSection(CeilingSection).GetValue<double?>("FiveHour"), profile.GetSection(CeilingSection).GetValue<double?>("SevenDay"))),
             StringComparer.OrdinalIgnoreCase));
 
     /// <summary>
@@ -77,5 +82,8 @@ public sealed record ScanFolder(string Key, string Folder);
 /// </summary>
 public sealed record ExplicitRoot(string Name, string Path, string? Profile, string? Title = null);
 
-/// <summary>A profile's settings: <c>Profiles:&lt;name&gt;</c>. Its environment reaches its sessions and scripts, under the root's own.</summary>
-public sealed record ProfileSettings(string? Description, IReadOnlyDictionary<string, string> Environment);
+/// <summary>
+/// A profile's settings: <c>Profiles:&lt;name&gt;</c>. Its environment reaches its sessions and scripts, under the root's own;
+/// its usage ceiling holds its roots' work, under the root's own (issue #600).
+/// </summary>
+public sealed record ProfileSettings(string? Description, IReadOnlyDictionary<string, string> Environment, UsageCeiling? UsageCeiling = null);

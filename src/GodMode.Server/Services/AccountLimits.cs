@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
+using GodMode.Shared.Models;
 
 namespace GodMode.Server.Services;
 
@@ -77,7 +78,13 @@ public sealed class AccountLimits
     /// What is known of one account: the limit it is under, or was last, whether its reset has been told, and the last
     /// info any session reported.
     /// </summary>
-    private sealed record Account(Limit? Limit, RateLimitInfo? Last, bool ResetTold = false);
+    private sealed record Account(Limit? Limit, RateLimitInfo? Last, bool ResetTold = false, Usage? Usage = null);
+
+    /// <summary>An account's usage windows as last reported (issue #600), each kept until a report names it again, and when.</summary>
+    private sealed record Usage(UsageWindow? FiveHour, UsageWindow? SevenDay, DateTime ObservedAt);
+
+    /// <summary>The <c>unifiedWindows</c> names of the windows the usage readings keep.</summary>
+    public const string FiveHourWindow = "five_hour", SevenDayWindow = "seven_day";
 
     private readonly ConcurrentDictionary<string, Account> _accounts =
         new(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
@@ -91,8 +98,10 @@ public sealed class AccountLimits
     {
         Limit? started = null;
         _accounts.AddOrUpdate(account,
-            _ => new Account(Started(null), info),
-            (_, known) => Started(known.Limit) is var limit && limit == known.Limit ? known with { Last = info } : new Account(limit, info));
+            _ => new Account(Started(null), info, Usage: UsageOf(null, info, now)),
+            (_, known) => Started(known.Limit) is var limit && limit == known.Limit
+                ? known with { Last = info, Usage = UsageOf(known.Usage, info, now) }
+                : new Account(limit, info, Usage: UsageOf(known.Usage, info, now)));
         return started;
 
         // Called once per attempt: an attempt another update overtook is tried again, and its start does not count
@@ -124,8 +133,57 @@ public sealed class AccountLimits
         return null;
     }
 
-    /// <summary>What a session under <paramref name="account"/> last reported of its limits (for the usage readings to come, #600).</summary>
+    /// <summary>What a session under <paramref name="account"/> last reported of its limits.</summary>
     public RateLimitInfo? LastOf(string account) => _accounts.TryGetValue(account, out var known) ? known.Last : null;
+
+    /// <summary>
+    /// The usage of <paramref name="account"/> as last reported (issue #600), its windows as claude gave them: null when no
+    /// session under it has reported a window. Whether a window has reset since is the reader's to say, at its own time.
+    /// </summary>
+    public AccountUsage? UsageOf(string account) =>
+        _accounts.TryGetValue(account, out var known) && known.Usage is { } usage
+            ? new AccountUsage(KeyOf(account), NameOf(account), usage.FiveHour, usage.SevenDay, usage.ObservedAt)
+            : null;
+
+    /// <summary>The usage of every account a session has reported a window of.</summary>
+    public AccountUsage[] Usages() =>
+        _accounts.Keys.Select(account => UsageOf(account)).OfType<AccountUsage>().OrderBy(usage => usage.Name, StringComparer.OrdinalIgnoreCase).ToArray();
+
+    /// <summary>
+    /// Whether <paramref name="info"/> changes the usage <paramref name="account"/> reported last: a window it names that
+    /// differs from the one kept. The time of the report alone is no change.
+    /// </summary>
+    public bool ChangesUsage(string account, RateLimitInfo info)
+    {
+        var kept = _accounts.TryGetValue(account, out var known) ? known.Usage : null;
+        return WindowOf(info, FiveHourWindow) is { } fiveHour && fiveHour != kept?.FiveHour
+            || WindowOf(info, SevenDayWindow) is { } sevenDay && sevenDay != kept?.SevenDay;
+    }
+
+    /// <summary>
+    /// The account's key the clients get (<see cref="AccountUsage.Account"/>): its config dir's path, hashed, so no path
+    /// of the server's leaves it, and one account is one key across restarts.
+    /// </summary>
+    public static string KeyOf(string account) =>
+        Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(OperatingSystem.IsWindows() ? account.ToUpperInvariant() : account)))[..12];
+
+    /// <summary>What the account is shown as: its config dir's folder name.</summary>
+    public static string NameOf(string account) =>
+        Path.GetFileName(Path.TrimEndingDirectorySeparator(account)) is { Length: > 0 } name ? name : account;
+
+    /// <summary>The kept usage with the windows <paramref name="info"/> reports over it; the kept usage when it reports none.</summary>
+    private static Usage? UsageOf(Usage? kept, RateLimitInfo info, DateTime now) =>
+        (WindowOf(info, FiveHourWindow), WindowOf(info, SevenDayWindow)) switch
+        {
+            (null, null) => kept,
+            var (fiveHour, sevenDay) => new Usage(fiveHour ?? kept?.FiveHour, sevenDay ?? kept?.SevenDay, now),
+        };
+
+    private static UsageWindow? WindowOf(RateLimitInfo info, string name) =>
+        info.Windows.TryGetValue(name, out var window) && window.Utilization is { } utilization
+            ? new UsageWindow(utilization, window.ResetsAt)
+            : null;
 
     /// <summary>
     /// Marks <paramref name="account"/> limited until <paramref name="until"/>, as a session's status.json says after a

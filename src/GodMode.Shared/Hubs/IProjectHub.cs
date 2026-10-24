@@ -20,6 +20,13 @@ public interface IProjectHub
     Task<ProjectRootInfo[]> ListProjectRoots();
 
     /// <summary>
+    /// The usage of every Claude account this server's sessions have reported on since it started (issue #600), one per
+    /// account; <see cref="ProjectRootInfo.Account"/> and <see cref="ProfileInfo.Account"/> say whose a root's or profile's is.
+    /// <see cref="IProjectHubClient.UsageChanged"/> pushes the same list whenever a reading changes.
+    /// </summary>
+    Task<AccountUsage[]> GetUsage();
+
+    /// <summary>
     /// Lists all projects.
     /// </summary>
     Task<ProjectSummary[]> ListProjects();

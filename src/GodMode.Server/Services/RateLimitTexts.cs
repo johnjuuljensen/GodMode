@@ -21,6 +21,16 @@ public static class RateLimitTexts
     public static string Held(DateTime until, DateTime now) =>
         $"its account is rate-limited, and it gets it when the limit resets, {When(until, now)}";
 
+    /// <summary>
+    /// Why the root starts and resumes nothing now (issue #600): "Root 'godmode' holds its work: its account (.claude-work) is at
+    /// 82% of its five-hour limit, over its ceiling of 70%; the window resets at 15:50".
+    /// </summary>
+    public static string OverCeiling(string root, string account, string? window, double used, double ceiling, DateTime? resets, DateTime now) =>
+        $"Root '{root}' holds its work: its account ({account}) is at {Percent(used)} of its {WindowName(window)}, over its ceiling of {Percent(ceiling)}"
+        + (resets is { } at ? $"; the window resets {When(at, now)}." : ".");
+
+    private static string Percent(double fraction) => (fraction * 100).ToString("0", CultureInfo.InvariantCulture) + "%";
+
     /// <summary>The limit as claude's <c>rateLimitType</c> names it, in words.</summary>
     public static string WindowName(string? window) => window switch
     {
