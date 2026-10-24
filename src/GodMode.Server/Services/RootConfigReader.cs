@@ -121,7 +121,12 @@ public class RootConfigReader : IRootConfigReader
             // One script: its output is the answer, as a status script's is
             List: NormalizeScriptPaths(baseRaw.List, godModeRootPath) is [var list] ? list : null,
             Environment: baseRaw.Environment,
-            IssueInfo: NormalizeScriptPaths(baseRaw.IssueInfo, godModeRootPath) is [var issueInfo] ? issueInfo : null);
+            IssueInfo: NormalizeScriptPaths(baseRaw.IssueInfo, godModeRootPath) is [var issueInfo] ? issueInfo : null,
+            // Never created or launched from: only what an existing session's scripts run with
+            Base: new CreateAction(BaseConfigFileName,
+                Delete: NormalizeScriptPaths(baseRaw.Delete, godModeRootPath),
+                Status: NormalizeScriptPaths(baseRaw.Status, godModeRootPath) is [var status] ? status : null,
+                Environment: baseRaw.Environment));
     }
 
     private static RootConfig BuildDefaultConfig() =>

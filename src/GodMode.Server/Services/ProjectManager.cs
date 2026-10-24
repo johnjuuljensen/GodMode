@@ -1737,7 +1737,8 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
             var snap = _snapshot;
             var rootPath = project.RootPath;
             var config = _rootConfigReader.ReadConfig(rootPath);
-            if (config.ResolveAction(ActionNameOf(project)) is not { Status: { } status } action) return unchanged;
+            // An action gone from the root still has the base config's status script (#594)
+            if (config.ResolveActionOrBase(ActionNameOf(project)) is not { Status: { } status } action) return unchanged;
             script = status;
 
             var env = BuildScriptEnvironment(rootPath, project, action, new Dictionary<string, JsonElement>(), ProfileEnvironment(snap, profileName),
@@ -1990,9 +1991,21 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
                     _logger.LogWarning("Project {ProjectId}: its root config cannot be read ({Reason}); its delete keeps the folder, so it goes on without the delete script", projectId, ex.Message);
                     config = new RootConfig();
                 }
-                var action = config.ResolveAction(ActionNameOf(project));
+                var actionName = ActionNameOf(project);
+                var action = config.ResolveAction(actionName);
                 // An action that shares folders now shares this one too, whatever the session was created as
                 sharedFolder |= action?.SharedFolder == true;
+                // An action gone from the root (renamed or removed) still has the root's checks: the base config's
+                // delete script runs. With none there either, nothing says what the folder may lose, and only a
+                // forced delete, or one that keeps the folder, goes on without a script (#594)
+                if (action == null && config.Base is { } fallback)
+                {
+                    action = fallback;
+                    if (action.Delete is not { Length: > 0 } && !sharedFolder && !force && !(project.Status.CreateFailed && !Directory.Exists(project.ProjectPath)))
+                        throw new InvalidOperationException(
+                            $"Root '{project.Status.RootName}' no longer has the action '{actionName}' and its config.json has no delete script, so nothing checks '{project.ProjectPath}' before it is deleted. Force the delete, or forget the session to keep the folder.");
+                    _logger.LogWarning("Project {ProjectId}: its root no longer has its action '{Action}', so its delete runs as the root's config.json", projectId, actionName);
+                }
 
                 // A create that failed before it made its folder left nothing for the script to take down
                 if (project.Status.CreateFailed && !Directory.Exists(project.ProjectPath))
