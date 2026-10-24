@@ -107,7 +107,7 @@ public partial class ProjectManager
         if (hold.Held != null)
         {
             // The user's own words, held: sent as the user's reply would have been
-            await ReplyAndResumeAsync(id, hold.Held);
+            await ReplyAndResumeAsync(id, hold.Held, answersPending: true, spoken: false, overCeiling: true);
             return;
         }
         if (_lifecycle.IsRunning(project))

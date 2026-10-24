@@ -5,7 +5,7 @@
 import { create } from 'zustand';
 import { GodModeHub, type ConnectionState, type OutputMessage } from '../signalr/hub';
 import type {
-  ProjectSummary, ProjectStatus, ClaudeMessage, PermissionDecision, PermissionDetail, AttentionItem, Importance,
+  AccountUsage, ProjectSummary, ProjectStatus, ClaudeMessage, PermissionDecision, PermissionDetail, AttentionItem, Importance,
 } from '../signalr/types';
 import * as api from '../services/hostApi';
 import type { AddServerRequest } from '../signalr/types';
@@ -517,6 +517,11 @@ function watchWake(retry: () => void) {
 }
 
 export const useAppStore = create<AppState>((set, get) => {
+  /** The server's accounts' usage readings (#600), its whole list: its roots and profiles show them, and nothing else changes. */
+  const setUsage = (serverId: string, usage: AccountUsage[]) => set(state => ({
+    serverConnections: state.serverConnections.map(c => c.serverInfo.Id === serverId ? { ...c, usage } : c),
+  }));
+
   /**
    * Opens a tile on a project's output from fromOffset: -turns for a new tail, which starts empty, or
    * the tile's offset to resume, adding what follows. Subscribed when its server connects.
@@ -642,6 +647,7 @@ export const useAppStore = create<AppState>((set, get) => {
           projects: [],
           roots: [],
           profiles: [],
+          usage: [],
         };
       });
 
@@ -867,6 +873,8 @@ export const useAppStore = create<AppState>((set, get) => {
         );
         return { serverConnections: connections, ...rebuildHierarchy(connections, state.profileFilter, state.sidebarGroupBy) };
       }),
+      // An account's reading changed (#600): the server's whole list, for its roots' and profiles' bars
+      onUsageChanged: (usage) => setUsage(serverId, usage),
       onStatusChanged: (_projectId, status) => {
         set(state => {
           // Stopped or failed with a message not echoed: claude never took it, and the message says so
@@ -987,7 +995,7 @@ export const useAppStore = create<AppState>((set, get) => {
       set(state => {
         const connections = state.serverConnections.map(c =>
           c.serverInfo.Id === serverId
-            ? { ...c, projects: [], roots: [], profiles: [], connectionState: 'disconnected' as ConnectionState }
+            ? { ...c, projects: [], roots: [], profiles: [], usage: [], connectionState: 'disconnected' as ConnectionState }
             : c
         );
         const { profileGroups, inactiveServers, profileFilterOptions } = rebuildHierarchy(connections, state.profileFilter, state.sidebarGroupBy);
@@ -1019,6 +1027,10 @@ export const useAppStore = create<AppState>((set, get) => {
         conn.hub.listProfiles(),
       ]);
       console.info(`[store] refreshProjects: ${serverId} -> ${projects.length} projects, ${roots.length} roots, ${profiles.length} profiles`);
+      // The readings are no part of the lists: one that fails leaves the bars out, and the lists as they are
+      conn.hub.getUsage()
+        .then(usage => setUsage(serverId, usage))
+        .catch(err => console.warn('[store] getUsage failed:', serverId, err));
       if (projects.length > 0) console.debug('[store] projects sample:', JSON.stringify(projects[0]));
       set(state => {
         const connections = state.serverConnections.map(c =>

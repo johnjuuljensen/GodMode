@@ -4,7 +4,7 @@
  */
 import * as signalR from '@microsoft/signalr';
 import type {
-  ProjectSummary, ProjectStatus, ProjectRootInfo, ProfileInfo, PermissionDecision, PermissionDetail, AttentionItem,
+  AccountUsage, ProjectSummary, ProjectStatus, ProjectRootInfo, ProfileInfo, PermissionDecision, PermissionDetail, AttentionItem,
   CreateProjectResult, DeleteProjectResult, IProjectHub, IProjectHubClient, UnmanagedFolder, Importance,
 } from './types';
 import { parseClaudeMessage } from './parseMessage';
@@ -38,6 +38,8 @@ export interface HubCallbacks {
   onProjectDeleted?: (projectId: string) => void;
   /** The server's roots or profiles changed: both are its whole lists, as listProjectRoots and listProfiles return them. */
   onRootsChanged?: (roots: ProjectRootInfo[], profiles: ProfileInfo[]) => void;
+  /** An account's usage reading changed (#600): the server's whole list, as getUsage returns it. */
+  onUsageChanged?: (usage: AccountUsage[]) => void;
   onStateChanged?: (state: ConnectionState) => void;
 }
 
@@ -142,6 +144,10 @@ export class GodModeHub {
 
     this.on(connection, 'RootsChanged', (roots, profiles) => {
       this.callbacks.onRootsChanged?.(roots, profiles);
+    });
+
+    this.on(connection, 'UsageChanged', (usage) => {
+      this.callbacks.onUsageChanged?.(usage);
     });
 
     const link: Link = { connection, retries: 0, timer: null, attemptSince: null, wanted: false };
@@ -258,6 +264,10 @@ export class GodModeHub {
 
   async listProjectRoots(): Promise<ProjectRootInfo[]> {
     return await this.invoke('ListProjectRoots');
+  }
+
+  async getUsage(): Promise<AccountUsage[]> {
+    return await this.invoke('GetUsage');
   }
 
   async listProjects(): Promise<ProjectSummary[]> {

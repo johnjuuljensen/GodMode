@@ -7,7 +7,7 @@
  */
 import type { ConnectionState, HubCallbacks, OutputMessage } from '../signalr/hub';
 import type {
-  CreateProjectResult, DeleteProjectResult, PermissionDecision, PermissionDetail, ProjectSummary, ProjectRootInfo, ProfileInfo, ProjectState, ProjectStatus, ServerInfo,
+  AccountUsage, CreateProjectResult, DeleteProjectResult, PermissionDecision, PermissionDetail, ProjectSummary, ProjectRootInfo, ProfileInfo, ProjectState, ProjectStatus, ServerInfo,
   UnmanagedFolder, Importance,
 } from '../signalr/types';
 import { parseClaudeMessage } from '../signalr/parseMessage';
@@ -64,6 +64,9 @@ export class FakeHub {
   callbacks: HubCallbacks = {};
   projects: ProjectSummary[];
   roots: ProjectRootInfo[];
+  profiles: ProfileInfo[] = [];
+  /** The accounts' usage readings getUsage answers (#600). */
+  usage: AccountUsage[] = [];
   state: ConnectionState = 'disconnected';
   /** When set, connect() rejects, as against a server that cannot be reached. */
   failConnect = false;
@@ -122,7 +125,8 @@ export class FakeHub {
   retryNow() { this.calls.retryNow++; }
   async listProjects() { this.invoke(); this.calls.listProjects++; return this.projects; }
   async listProjectRoots() { this.invoke(); return this.roots; }
-  async listProfiles(): Promise<ProfileInfo[]> { this.invoke(); return []; }
+  async listProfiles(): Promise<ProfileInfo[]> { this.invoke(); return this.profiles; }
+  async getUsage(): Promise<AccountUsage[]> { this.invoke(); return this.usage; }
   async getAttention() { this.invoke(); this.calls.getAttention++; return []; }
   async subscribeProject(projectId: string, fromOffset: number, subscriptionId: string, generation: string | null) {
     this.invoke();
@@ -261,7 +265,7 @@ export async function connectServers(hubs: Record<string, FakeHub>) {
   const conn = (id: string, hub: FakeHub): ServerConnection => ({
     serverInfo: { Id: id, Name: `Server ${id}`, Type: 'local', State: 'Running' } as ServerInfo,
     hub: hub as unknown as ServerConnection['hub'],
-    connectionState: 'disconnected', projects: [], roots: [], profiles: [],
+    connectionState: 'disconnected', projects: [], roots: [], profiles: [], usage: [],
   });
   useAppStore.setState({ serverConnections: Object.entries(hubs).map(([id, hub]) => conn(id, hub)) });
   for (const id of Object.keys(hubs)) await useAppStore.getState().connectServer(id);

@@ -128,6 +128,9 @@ public sealed class ProjectLifecycle
     /// <summary>The accounts' rate limits (issue #596), fed by every session's <c>rate_limit_event</c> as its consumer handles it.</summary>
     public AccountLimits AccountLimits { get; } = new();
 
+    /// <summary>The usage pushes (issue #600), in order, not waited for.</summary>
+    private readonly ClientSends _usageSends = new();
+
     public bool IsRunning(ProjectInfo project) => _processManager.IsProcessRunning(project.Process.ProcessId);
 
     /// <summary>How long a stop gives claude to exit once interrupted.</summary>
@@ -738,7 +741,14 @@ public sealed class ProjectLifecycle
     {
         var now = DateTime.UtcNow;
         if (info.IsRejected) project.Process.Rejected(info);
-        if (AccountLimits.Observe(project.ConfigDir ?? "", info, project.Status.Id, now) is not { } started) return false;
+        var account = project.ConfigDir ?? "";
+        var usageChanged = AccountLimits.ChangesUsage(account, info);
+        var started = AccountLimits.Observe(account, info, project.Status.Id, now);
+        // Every client hears the account's new reading (issue #600): its roots' and profiles' bars
+        if (usageChanged)
+            _ = _usageSends.SendAsync(() => _hubContext.Clients.All.UsageChanged(AccountLimits.Usages()),
+                ex => _logger.LogError(ex, "Error pushing the accounts' usage"));
+        if (started == null) return false;
         _logger.LogWarning("Project {ProjectId} hit its account's {Window} rate limit ({Account}); it resets at {Until:u}",
             project.Status.Id, info.Window ?? "usage", project.ConfigDir, started.Until);
         project.Status = project.Status with

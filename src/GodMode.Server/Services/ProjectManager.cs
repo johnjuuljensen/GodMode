@@ -378,6 +378,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
                     Roots = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
                     Environment = settings is { Environment.Count: > 0 } ? new Dictionary<string, string>(settings.Environment) : null,
                     Description = settings?.Description ?? root.Config.Description,
+                    UsageCeiling = settings?.UsageCeiling,
                 };
             }
             profile.Roots[root.Name] = root.Path;
@@ -781,7 +782,8 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
     /// </summary>
     private RootsView BuildRootsView(ProfileSnapshot snap)
     {
-        var profiles = snap.Profiles.Select(kvp => new ProfileInfo(kvp.Key, kvp.Value.Description)).ToArray();
+        var profiles = snap.Profiles.Select(kvp => new ProfileInfo(kvp.Key, kvp.Value.Description,
+            AccountLimits.KeyOf(ProfileAccount(kvp.Key, kvp.Value)), kvp.Value.UsageCeiling)).ToArray();
         var roots = AllRoots(snap).Select(root =>
         {
             // The default root, there when no source names one, was found by no read
@@ -790,7 +792,8 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
                 .Select(a => new CreateActionInfo(a.Name, a.Description, a.InputSchema, a.Session ? a.Model : null,
                     a.Session && a.AllowSkipPermissions, a.Session, a.Session && a.Transient, a.Session ? a.Effort : null))
                 .ToArray();
-            return new ProjectRootInfo(root.Root, config.Description, actions, ProfileName: root.Profile, Title: config.Title);
+            return new ProjectRootInfo(root.Root, config.Description, actions, ProfileName: root.Profile, Title: config.Title,
+                Account: AccountLimits.KeyOf(RootAccount(snap, root.Profile, config, null)), UsageCeiling: CeilingOf(snap, root.Profile, config));
         }).ToArray();
         return new RootsView(roots, profiles, JsonSerializer.Serialize(new { roots, profiles }, JsonDefaults.Options));
     }
@@ -885,6 +888,8 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
             throw new ArgumentException(
                 $"Root '{request.ProjectRootName}' does not allow Skip Permissions for action '{action.Name}': its config would need \"allowSkipPermissions\": true.");
         RequestedEffort(request.Inputs);
+        // Its account above the root's ceiling: the root starts no session until the window drops (issue #600)
+        RefuseCreateOverCeiling(snap, request.ProfileName, request.ProjectRootName, config, action);
 
         // Get profile environment for merging
         snap.Profiles.TryGetValue(request.ProfileName, out var profileConfig);
@@ -1464,11 +1469,19 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         await NotifyStatusChanged(project);
     }
 
-    public async Task ReplyAndResumeAsync(string projectId, string text, bool answersPending = true, bool spoken = false)
+    public Task ReplyAndResumeAsync(string projectId, string text, bool answersPending = true, bool spoken = false) =>
+        ReplyAndResumeAsync(projectId, text, answersPending, spoken, overCeiling: false);
+
+    /// <param name="overCeiling">
+    /// Resumes the session even while its account is above its root's ceiling (issue #600): the send at a rate limit's reset
+    /// (#596) of what the user sent meanwhile, which the limit, not the ceiling, held.
+    /// </param>
+    private async Task ReplyAndResumeAsync(string projectId, string text, bool answersPending, bool spoken, bool overCeiling)
     {
         if (!_projects.TryGetValue(projectId, out var project))
             throw new KeyNotFoundException($"Project {projectId} not found");
         RefuseFailedCreate(project);
+        if (!overCeiling) RefuseResumeOverCeiling(project);
         if (!answersPending) RefuseWhilePending(project);
         if (spoken) RefusePermissionPending(project);
         SlashCommands.Check(text, project.Status);
@@ -2194,6 +2207,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
             throw new KeyNotFoundException($"Project {projectId} not found");
         }
         RefuseFailedCreate(project);
+        RefuseResumeOverCeiling(project);
 
         Task? sessionStart = null;
         await WithTrackedLockAsync(project, async () =>

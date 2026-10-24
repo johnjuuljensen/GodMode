@@ -19,6 +19,7 @@ const server = (id: string, roots: ProjectRootInfo[], projects: ProjectSummary[]
   hub: {} as GodModeHub,
   connectionState,
   projects,
+  usage: [],
   roots,
   profiles: [...new Set(roots.map(r => r.ProfileName!))].map(Name => ({ Name })),
 });

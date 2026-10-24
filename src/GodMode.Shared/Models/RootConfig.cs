@@ -19,6 +19,7 @@ namespace GodMode.Shared.Models;
 /// The root's <c>issueInfo</c> script (<c>config.json</c>'s, rootPath-relative), which prints an issue's title and
 /// labels (<see cref="Models.IssueInfo"/>); null when it has none.
 /// </param>
+/// <param name="UsageCeiling">The root's usage ceiling (<c>config.json</c>'s <c>usageCeiling</c>, issue #600); null when it sets none.</param>
 /// <param name="Base">
 /// <c>config.json</c> alone, as an action: what a session whose action is gone from the root falls back to for its
 /// <c>delete</c> and <c>status</c> scripts (<see cref="ResolveActionOrBase"/>). Null when the root has no config.json.
@@ -32,7 +33,8 @@ public record RootConfig(
     Dictionary<string, string>? Environment = null,
     string? Title = null,
     string? IssueInfo = null,
-    CreateAction? Base = null)
+    CreateAction? Base = null,
+    UsageCeiling? UsageCeiling = null)
 {
     /// <summary>
     /// Resolves a specific action by name (case-insensitive).

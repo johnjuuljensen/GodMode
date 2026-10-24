@@ -82,4 +82,10 @@ public interface IProjectHubClient
     /// <see cref="ProjectCreated"/> and <see cref="ProjectDeleted"/>.
     /// </summary>
     Task RootsChanged(ProjectRootInfo[] roots, ProfileInfo[] profiles);
+
+    /// <summary>
+    /// An account's usage reading changed (issue #600): <paramref name="usage"/> is the whole list, as
+    /// <see cref="IProjectHub.GetUsage"/> returns it.
+    /// </summary>
+    Task UsageChanged(AccountUsage[] usage);
 }

@@ -21,4 +21,7 @@ public class ProfileConfig
     /// Optional description of the profile.
     /// </summary>
     public string? Description { get; set; }
+
+    /// <summary>The profile's usage ceiling (issue #600), under each root's own.</summary>
+    public GodMode.Shared.Models.UsageCeiling? UsageCeiling { get; set; }
 }

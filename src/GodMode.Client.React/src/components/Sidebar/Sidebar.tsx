@@ -10,6 +10,7 @@ import { UnmanagedGroup } from './UnmanagedGroup';
 import { Inbox } from '../Inbox/Inbox';
 import { useAttentionBesidesOpen } from '../Inbox/useInboxAttention';
 import { VoiceControl } from '../Voice/VoiceControl';
+import { ProfileUsage, RootUsage } from '../Usage/UsageBars';
 import './Sidebar.css';
 
 /** What is under each profile: the profile is always the top level (#308). */
@@ -270,6 +271,7 @@ function ProfileSection({ group }: { group: ProfileGroup }) {
           ? <FoldToggle folded={folded} onToggle={() => toggleFoldedHeader(foldKey)} what={`the ${group.name} profile`}>{name}</FoldToggle>
           : name}
         <span className="profile-group-meta">
+          <ProfileUsage profileName={group.name} />
           {anyNeedsYou && <span className="project-children-attention" aria-label="needs you" />}
           {canOpenWindow && (
             <button
@@ -337,6 +339,7 @@ function RootSection({ rootGroup }: { rootGroup: RootGroup }) {
             )
             : <span className="root-group-name" title={rootGroup.tooltip}>{rootGroup.name}</span>}
           {folded && <FoldSummary sessions={sessionsOf(rootGroup)} needsYou={needsYou} />}
+          {serverId && <RootUsage serverId={serverId} profileName={profileName} rootName={rootName} />}
           {rootGroup.canCreate && serverId && (
             <button
               className="root-action-btn"
