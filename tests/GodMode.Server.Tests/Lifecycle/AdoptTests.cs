@@ -295,6 +295,48 @@ public sealed class AdoptTests
         Assert.DoesNotContain(await harness.Projects.ListProjectsAsync(), p => p.Id == adopted.Id);
     }
 
+    /// <summary>
+    /// A session whose action is gone from its root (renamed or removed) still gets the root's checks: its delete
+    /// runs the base config's delete script (#594).
+    /// </summary>
+    [Fact]
+    public async Task Delete_OfASessionWhoseActionIsGone_RunsTheBaseDeleteScript()
+    {
+        await using var harness = ListingRoot();
+        await harness.Projects.RecoverProjectsAsync();
+        var adopted = await harness.AdoptAsync("plain-one", "plain");
+        File.Delete(Path.Combine(harness.RootPath, ".godmode-root", "config.plain.json"));
+
+        await harness.Projects.DeleteProjectAsync(adopted.Id);
+
+        Assert.True(File.Exists(Logged(harness, "delete-ran.txt")), "the base delete script did not run for a session whose action is gone");
+        Assert.False(Directory.Exists(Path.Combine(harness.RootPath, "plain-one")));
+    }
+
+    /// <summary>
+    /// With its action gone and no delete script in the base config either, nothing checks the folder: the delete
+    /// is refused and the folder kept, unless it is forced (#594).
+    /// </summary>
+    [Fact]
+    public async Task Delete_OfASessionWhoseActionIsGone_WithNoBaseDeleteScript_IsRefusedUnlessForced()
+    {
+        await using var harness = ListingRoot();
+        await harness.Projects.RecoverProjectsAsync();
+        var adopted = await harness.AdoptAsync("plain-one", "plain");
+        var config = Path.Combine(harness.RootPath, ".godmode-root");
+        File.Delete(Path.Combine(config, "config.plain.json"));
+        File.WriteAllText(Path.Combine(config, "config.json"),
+            File.ReadAllText(Path.Combine(config, "config.json")).Replace(",\"delete\":\"delete.ps1\"", ""));
+        var folder = Path.Combine(harness.RootPath, "plain-one");
+
+        var refused = await Assert.ThrowsAsync<InvalidOperationException>(() => harness.Projects.DeleteProjectAsync(adopted.Id));
+        Assert.Contains("no longer has the action 'plain'", refused.Message);
+        Assert.True(File.Exists(Path.Combine(folder, "work.txt")));
+
+        await harness.Projects.DeleteProjectAsync(adopted.Id, force: true);
+        Assert.False(Directory.Exists(folder));
+    }
+
     [Fact]
     public async Task Adopt_OfAFolderASessionIsIn_IsRefused()
     {

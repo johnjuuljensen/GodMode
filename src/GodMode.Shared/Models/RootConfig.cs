@@ -19,6 +19,10 @@ namespace GodMode.Shared.Models;
 /// The root's <c>issueInfo</c> script (<c>config.json</c>'s, rootPath-relative), which prints an issue's title and
 /// labels (<see cref="Models.IssueInfo"/>); null when it has none.
 /// </param>
+/// <param name="Base">
+/// <c>config.json</c> alone, as an action: what a session whose action is gone from the root falls back to for its
+/// <c>delete</c> and <c>status</c> scripts (<see cref="ResolveActionOrBase"/>). Null when the root has no config.json.
+/// </param>
 public record RootConfig(
     string? Description = null,
     IReadOnlyDictionary<string, CreateAction>? Actions = null,
@@ -27,7 +31,8 @@ public record RootConfig(
     string? List = null,
     Dictionary<string, string>? Environment = null,
     string? Title = null,
-    string? IssueInfo = null)
+    string? IssueInfo = null,
+    CreateAction? Base = null)
 {
     /// <summary>
     /// Resolves a specific action by name (case-insensitive).
@@ -47,6 +52,12 @@ public record RootConfig(
         using var enumerator = Actions.Values.GetEnumerator();
         return enumerator.MoveNext() ? enumerator.Current : null;
     }
+
+    /// <summary>
+    /// The action a session that already exists runs its scripts as: its own, else, when the root no longer has it
+    /// (renamed or removed), <see cref="Base"/>, so its delete and status scripts still run.
+    /// </summary>
+    public CreateAction? ResolveActionOrBase(string? actionName) => ResolveAction(actionName) ?? Base;
 
     /// <summary>
     /// Returns all effective create actions.
