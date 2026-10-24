@@ -319,6 +319,11 @@ export class GodModeHub {
     await this.invoke('SetImportance', projectId, importance);
   }
 
+  /** Hides the project from the list, or shows it again (#598): kept with the session, so every device agrees. */
+  async setHidden(projectId: string, hidden: boolean): Promise<void> {
+    await this.invoke('SetHidden', projectId, hidden);
+  }
+
   /**
    * Answers the project whether claude runs or not: input to a running one (denying a pending
    * permission with it, or answering a single pending question), else a resume and then the input.

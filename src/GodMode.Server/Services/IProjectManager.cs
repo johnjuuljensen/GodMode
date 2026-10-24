@@ -101,6 +101,9 @@ public interface IProjectManager
     /// <summary>Sets how much the project may interrupt the user, in its settings.json (hub SetImportance, issue #438).</summary>
     Task SetImportanceAsync(string projectId, Importance importance);
 
+    /// <summary>Hides the project from the app's list, or shows it again, in its settings.json (hub SetHidden, issue #598).</summary>
+    Task SetHiddenAsync(string projectId, bool hidden);
+
     /// <summary>
     /// The fleet's <c>escalate</c>: the session asks the user to decide <paramref name="text"/>, an
     /// <see cref="AttentionKind.Escalation"/> on it until the user has seen it. Replaces one it asked before.

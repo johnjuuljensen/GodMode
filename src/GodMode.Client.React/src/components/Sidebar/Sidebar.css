@@ -404,7 +404,8 @@
   background: var(--warning);
 }
 
-/* A child nested under a parent in another root: its own root, beside its kind */
+/* A child nested under a parent in another root: its own root, beside its kind; and a hidden session's mark (#598) */
+.project-hidden-mark,
 .project-own-root {
   flex-shrink: 0;
   font-size: 9px;
@@ -991,7 +992,8 @@
 }
 
 /* The row menu's tiers (#438): the current one checked, hovered without Delete's red */
-.project-item-menu-item.importance:hover {
+.project-item-menu-item.importance:hover,
+.project-item-menu-item.hide:hover {
   background: var(--glass-border-strong);
 }
 

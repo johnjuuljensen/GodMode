@@ -26,13 +26,18 @@ namespace GodMode.ProjectFiles;
 /// How much the session may interrupt the user (issue #438): its action's <c>importance</c> at its create or adopt, and the
 /// user's since (<c>SetImportance</c>). <see cref="Importance.Normal"/> for a session from before tiers.
 /// </param>
+/// <param name="Hidden">
+/// Whether the user hid the session from the app's list (issue #598, <c>SetHidden</c>): it folds under its group's older
+/// sessions whatever its state. False for a session from before hiding.
+/// </param>
 public record ProjectSettings(
     bool DangerouslySkipPermissions = false,
     string? ActionName = null,
     string? PermissionMode = null,
     bool SharedFolder = false,
     bool Adopted = false,
-    Importance Importance = Importance.Normal
+    Importance Importance = Importance.Normal,
+    bool Hidden = false
 )
 {
     private static readonly JsonSerializerOptions JsonOptions = new()

@@ -62,6 +62,7 @@ export function ProjectView({ serverId, projectId }: Props) {
   const notFound = conn?.connectionState === 'connected' && projectsListed && !project;
   // Being deleted (#599): it is read, not acted on, until it leaves the list or its delete fails
   const deleting = project?.Deleting === true;
+  const setHidden = useAppStore(s => s.setHidden);
 
   useEffect(() => {
     // Resumes from the transcript held, so reopening only adds what is new. Open while it shows: the
@@ -216,6 +217,16 @@ export function ProjectView({ serverId, projectId }: Props) {
         </div>
         <div className="project-header-actions">
           {project && !deleting && <ImportancePicker serverId={serverId} projectId={projectId} importance={project.Importance} />}
+          {/* Hidden (#598): it folds under its group's older, whatever its state, and is shown again from here or its row */}
+          {project && !deleting && (
+            <button
+              className={`btn btn-toggle ${project.Hidden ? 'active' : ''}`}
+              onClick={() => void setHidden(serverId, projectId, !project.Hidden).catch(err => console.error('Failed to hide or show the project:', err))}
+              title={project.Hidden ? 'Show it in the list again' : 'Hide it under older in the list'}
+            >
+              {project.Hidden ? 'Unhide' : 'Hide'}
+            </button>
+          )}
           <button
             className={`btn btn-toggle ${simpleView ? 'active' : ''}`}
             onClick={toggleSimpleView}

@@ -397,14 +397,20 @@ export const TRANSIENT_FOLD_AFTER_MS = 1 * DAY_MS;
 const LIVE_STATES = new Set(['Running', 'WaitingInput', 'WaitingPermission', 'Idle']);
 
 /**
- * Whether the item folds at `now`: no claude, nothing the caller keeps it for (it needs the user, it is open),
- * and quiet long enough. A parent folds with what it started, and only when every one of them folds too (#390).
+ * Whether the item folds at `now`: nothing the caller keeps it for (it needs the user, it is open), and either hidden
+ * by the user (#598), in any state, or with no claude and quiet long enough. A parent folds with what it started, and
+ * only when every one of them folds too (#390); a hidden parent takes what it started with it, but what the caller
+ * keeps still keeps it shown.
  */
-export function folds(item: SidebarItem, now: number, keep: (item: SidebarItem) => boolean): boolean {
-  if (LIVE_STATES.has(String(item.project.State ?? 'Idle')) || keep(item)) return false;
-  const quiet = now - new Date(item.project.UpdatedAt).getTime();
-  return quiet > (item.transient ? TRANSIENT_FOLD_AFTER_MS : FOLD_AFTER_MS)
-    && item.children.every(c => folds(c, now, keep));
+export function folds(item: SidebarItem, now: number, keep: (item: SidebarItem) => boolean, hiddenAbove = false): boolean {
+  if (keep(item)) return false;
+  const hidden = hiddenAbove || item.project.Hidden === true;
+  if (!hidden) {
+    if (LIVE_STATES.has(String(item.project.State ?? 'Idle'))) return false;
+    const quiet = now - new Date(item.project.UpdatedAt).getTime();
+    if (quiet <= (item.transient ? TRANSIENT_FOLD_AFTER_MS : FOLD_AFTER_MS)) return false;
+  }
+  return item.children.every(c => folds(c, now, keep, hidden));
 }
 
 /** Every session nested under the item, on every level. */

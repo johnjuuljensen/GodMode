@@ -691,6 +691,13 @@ export interface ProjectStatus {
    * the JSON when false.
    */
   Deleting?: boolean;
+  /**
+   * Whether the user hid the session (issue #598): its `settings.json`'s, not status.json's, set by
+   * IProjectHub.SetHidden. The app folds it under its group's older sessions whatever its state, unless it is
+   * open or needs the user. Nothing else changes: its claude, its attention items and its pull request carry
+   * on. Left out of the JSON when false.
+   */
+  Hidden?: boolean;
 }
 
 /** Summary information about a project. */
@@ -766,6 +773,11 @@ export interface ProjectSummary {
    * when false.
    */
   Deleting?: boolean;
+  /**
+   * Whether the user hid the session, as in ProjectStatus.Hidden (issue #598). Left out of the JSON when
+   * false.
+   */
+  Hidden?: boolean;
 }
 
 /**
@@ -944,6 +956,12 @@ export interface IProjectHub {
    * and voice agree. Its IProjectHubClient.StatusChanged and IProjectHubClient.AttentionChanged follow.
    */
   SetImportance(projectId: string, importance: Importance): Promise<void>;
+  /**
+   * Hides the project from the app's list, or shows it again (issue #598), in its `settings.json`, so every
+   * client agrees: ProjectStatus.Hidden. Hiding is not muting: its attention items and its claude carry on.
+   * Its IProjectHubClient.StatusChanged follows.
+   */
+  SetHidden(projectId: string, hidden: boolean): Promise<void>;
   /**
    * Answers the project, whatever it is waiting on and whether or not its claude is running. With claude
    * running this is IProjectHub.SendInput: a pending permission request is denied with text as the reason, a

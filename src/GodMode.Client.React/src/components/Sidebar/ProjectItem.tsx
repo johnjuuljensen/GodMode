@@ -35,7 +35,7 @@ const SWIPE_SLOP_PX = 10;
 
 /** The row menu's size, as Sidebar.css gives it, to keep it on the screen: the three tiers, a separator and Delete. */
 const MENU_WIDTH_PX = 160;
-const MENU_HEIGHT_PX = 150;
+const MENU_HEIGHT_PX = 185;
 
 /**
  * A session in the list. Its delete is never a bare button (#325): on a phone the row is swiped to the
@@ -82,6 +82,12 @@ export function ProjectItem({ item, isSelected, onSelect, nested }: Props) {
   const handleDelete = () => { close(); void deleteSession(item.serverId, project); };
   const setImportance = useAppStore(s => s.setImportance);
   const importance = project.Importance ?? 'Normal';
+  const setHidden = useAppStore(s => s.setHidden);
+  const hidden = project.Hidden === true;
+  const toggleHidden = () => {
+    close();
+    void setHidden(item.serverId, project.Id, !hidden).catch(err => console.error('Failed to hide or show the project:', err));
+  };
 
   // Kept on the screen: a menu opened near its right or bottom edge opens back from it. It is portalled to
   // the body (below), so these are the viewport's edges and not the sidebar's, which clips it otherwise
@@ -162,6 +168,7 @@ export function ProjectItem({ item, isSelected, onSelect, nested }: Props) {
             <div className="project-name" title={project.Name}>{project.Name}</div>
             <ImportanceMark importance={project.Importance} />
             <KindLabel kind={project.Kind} />
+            {hidden && <span className="project-hidden-mark" title="Hidden: it stays under older">hidden</span>}
             <BackgroundBadge tasks={project.BackgroundTasks} />
             {ownRoot && <span className="project-own-root" title={`In ${ownRoot}`}>{ownRoot}</span>}
           </div>
@@ -218,6 +225,9 @@ export function ProjectItem({ item, isSelected, onSelect, nested }: Props) {
             </button>
           ))}
           <div className="project-item-menu-separator" role="separator" />
+          <button className="project-item-menu-item hide" role="menuitem" onClick={toggleHidden}>
+            {hidden ? 'Unhide' : 'Hide'}
+          </button>
           <button className="project-item-menu-item danger" role="menuitem" onClick={handleDelete}>
             {project.SharedFolder && !project.Adopted ? 'Delete' : 'Delete…'}
           </button>

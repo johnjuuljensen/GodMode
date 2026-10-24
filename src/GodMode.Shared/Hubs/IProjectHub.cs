@@ -119,6 +119,13 @@ public interface IProjectHub
     Task SetImportance(string projectId, Importance importance);
 
     /// <summary>
+    /// Hides the project from the app's list, or shows it again (issue #598), in its <c>settings.json</c>, so every client
+    /// agrees: <see cref="ProjectStatus.Hidden"/>. Hiding is not muting: its attention items and its claude carry on.
+    /// Its <see cref="IProjectHubClient.StatusChanged"/> follows.
+    /// </summary>
+    Task SetHidden(string projectId, bool hidden);
+
+    /// <summary>
     /// Answers the project, whatever it is waiting on and whether or not its claude is running.
     /// With claude running this is <see cref="SendInput"/>: a pending permission request is denied
     /// with <paramref name="text"/> as the reason, a pending question with a single question is
