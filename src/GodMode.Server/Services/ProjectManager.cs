@@ -1190,7 +1190,20 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
                 // Once its ID is its own: a failed add never replaces another session's record
                 FleetGrantFile.Write(project.RootPath, project.SessionId,
                     new FleetGrantFile.Grant(action.Name, fleetToolsGranted, Path.GetRelativePath(project.RootPath, project.ProjectPath), project.Status.ParentId));
-                await _lifecycle.StartAsync(project, prompt, BuildLaunchSpec(project));
+                var launch = BuildLaunchSpec(project);
+                // Its account's rate limit would refuse the prompt (issue #596): claude starts without it, and it is sent at the reset
+                if (prompt != null && LimitHolding(project) is { Until: var until, Window: var window })
+                {
+                    _logger.LogInformation("Project {ProjectId}: its account is rate-limited until {Until:u}; its prompt is held for the reset", projectId, until);
+                    project.Status = project.Status with
+                    {
+                        State = ProjectState.Idle, RateLimited = new RateLimitHold(until, window, DateTime.UtcNow, Held: prompt),
+                    };
+                    await _statusUpdater.SaveStatusAsync(project);
+                    prompt = null;
+                }
+                await _lifecycle.StartAsync(project, prompt, launch);
+                ScheduleLimitResume(project);
             }
             catch (Exception ex)
             {
@@ -1412,6 +1425,8 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
             RefuseFailedCreate(project);
             SlashCommands.Check(input, project.Status);
             await UserWritesAsync(project);
+            // Its account's rate limit would refuse it: held for the reset (issue #596), unless it answers a prompt
+            if (project.Process.OldestPending == null && await HoldForLimitAsync(project, input)) return;
         }
         await SendInputAsync(projectId, input, answersPending: true);
     }
@@ -1460,6 +1475,9 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         if (spoken) text = SpokenInput.Mark(text);
         // The user's reply answers what is pending; the fleet's send, which does not, starts no turn of the user's
         if (answersPending) await UserWritesAsync(project);
+        // Its account's rate limit would refuse it: the user's reply is held for the reset (issue #596), unless it answers
+        // a prompt. The fleet's send holds it in the session's inbox (SendOrHoldAsync)
+        if (answersPending && project.Process.OldestPending == null && await HoldForLimitAsync(project, text)) return;
 
         // One reply at a time decides whether to resume: two would launch two processes. The wait
         // for the session to start comes after the lock, so a stop is not held behind it
@@ -1724,13 +1742,14 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
     }
 
     /// <summary>
-    /// After every status push: the pull request check a transition to Idle or Stopped makes, the delivery of what is
-    /// held (<see cref="DeliverOnStatusChange"/>), then the attention list. The parent's notice came before the push
+    /// After every status push: the pull request check a transition to Idle or Stopped makes, the resume at the reset of
+    /// a rate limit that holds it (<see cref="ScheduleLimitResume"/>), the delivery of what is held (<see cref="DeliverOnStatusChange"/>), then the attention list. The parent's notice came before the push
     /// (<see cref="NoticeParent"/>).
     /// </summary>
     private Task OnStatusNotifiedAsync(ProjectInfo project)
     {
         _pullRequests.Observe(project.Status.Id, project.Status.State);
+        ScheduleLimitResume(project);
         DeliverOnStatusChange(project);
         return PushAttentionIfChangedAsync();
     }
@@ -1953,6 +1972,12 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
 
         // Before a launch or after it, never in the middle of one
         await WithTrackedLockAsync(project, () => _lifecycle.StopAsync(project));
+        // The user stopped it: nothing is sent at its rate limit's reset (issue #596)
+        if (project.Status.RateLimited != null)
+        {
+            _logger.LogInformation("Project {ProjectId} was stopped by the user: it is not sent on at its rate limit's reset", projectId);
+            await _lifecycle.UpdateStatusAsync(project, status => status with { RateLimited = null });
+        }
         await NotifyStatusChanged(project);
     }
 
@@ -2373,6 +2398,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         {
             _refreshLock.Release();
         }
+        ScheduleRecoveredLimits();
         await PushAttentionIfChangedAsync();
         StartWatchingRoots();
     }

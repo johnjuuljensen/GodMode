@@ -1071,7 +1071,7 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
     /// </summary>
     internal static bool OnlyTells(AttentionItem item) => item.Kind switch
     {
-        AttentionKind.Finished or AttentionKind.Error or AttentionKind.Review => true,
+        AttentionKind.Finished or AttentionKind.Error or AttentionKind.Review or AttentionKind.RateLimited => true,
         AttentionKind.Question => item.Outcome == TurnOutcome.Blocked,
         _ => false,
     };
@@ -1414,6 +1414,7 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
         AttentionKind.Review => "changes requested on its pull request",
         AttentionKind.Finished when item.Outcome == TurnOutcome.Done => "finished",
         AttentionKind.Finished => "idle (it did not say it is done)",
+        AttentionKind.RateLimited => "its account's rate limit (GodMode sends its sessions on at the reset)",
     };
 
     /// <summary>

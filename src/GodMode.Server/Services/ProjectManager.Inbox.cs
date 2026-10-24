@@ -37,6 +37,8 @@ public partial class ProjectManager
 
         _logger.LogInformation("Project {ProjectId} messages its parent {ParentId} ({Length} characters)", projectId, parentId, text.Length);
         await HoldAsync(parent, new SessionInbox.HeldMessage(DateTime.UtcNow, projectId, SessionInbox.HeldKind.Message, text));
+        // A parent its account's rate limit holds gets it at the reset (issue #596)
+        await HoldForLimitAsync(parent, userText: null);
         return await DeliverHeldAsync(parent);
     }
 
@@ -49,6 +51,14 @@ public partial class ProjectManager
         CheckText(text);
         SlashCommands.Check(text, project.Status);
         var held = new SessionInbox.HeldMessage(DateTime.UtcNow, senderId, SessionInbox.HeldKind.Send, text);
+
+        // Its account's rate limit would refuse it (issue #596): held, and the session is sent on at the reset with it
+        if (WaitsOnTheUser(project) == null && LimitHolding(project) is { Until: var until })
+        {
+            await HoldAsync(project, held);
+            await HoldForLimitAsync(project, userText: null);
+            return new Delivery(false, RateLimitTexts.Held(until, DateTime.UtcNow));
+        }
 
         if (WaitsOnTheUser(project) is { } waiting)
         {
@@ -136,6 +146,7 @@ public partial class ProjectManager
     private string? WhyHeld(ProjectInfo project) =>
         _lifecycle.CanTakeInput(project) ? null
         : WaitsOnTheUser(project) is { } waiting ? waiting
+        : project.Status.RateLimited is { } limited ? RateLimitTexts.Held(limited.Until, DateTime.UtcNow)
         : !_lifecycle.IsRunning(project) || project.Process.Stopping
             ? project.Process.Launching ? "it is starting, and gets it once it has started" : "it is stopped, and gets it when it is resumed"
         : project.Status.State == ProjectState.Error ? "it is in error, waiting on the user, and gets it after its next turn"
@@ -351,6 +362,7 @@ public partial class ProjectManager
             { PendingQuestion: { } question } => $", waiting on the user's answer to: {string.Join(" ", question.Questions.Select(q => q.Question))}",
             { State: ProjectState.WaitingInput, CurrentQuestion: { } asked } => $", waiting on the user's answer to: {asked}",
             { State: ProjectState.Error } => $": {status.LastError ?? "it failed"}",
+            { RateLimited: { } limited } => $": its account's rate limit holds it, and GodMode sends it on when the limit resets, {RateLimitTexts.When(limited.Until, DateTime.UtcNow)}",
             { State: ProjectState.Idle } => ": its turn ended",
             _ => "",
         };

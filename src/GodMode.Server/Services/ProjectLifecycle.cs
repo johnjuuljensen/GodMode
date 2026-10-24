@@ -125,6 +125,9 @@ public sealed class ProjectLifecycle
 
     public bool ShuttingDown => _shuttingDown;
 
+    /// <summary>The accounts' rate limits (issue #596), fed by every session's <c>rate_limit_event</c> as its consumer handles it.</summary>
+    public AccountLimits AccountLimits { get; } = new();
+
     public bool IsRunning(ProjectInfo project) => _processManager.IsProcessRunning(project.Process.ProcessId);
 
     /// <summary>How long a stop gives claude to exit once interrupted.</summary>
@@ -344,10 +347,11 @@ public sealed class ProjectLifecycle
     /// <summary>
     /// Whether the project can take input that is not the user's: its claude runs, is not being stopped, has ended
     /// its turn (Idle) and waits on no permission prompt or question. Running, WaitingInput (a question, which is the
-    /// user's) and WaitingPermission cannot, nor can Error, which waits on the user too.
+    /// user's) and WaitingPermission cannot, nor can Error, which waits on the user too. Nor can a session its account's
+    /// rate limit holds (issue #596): what is held for it waits for the reset.
     /// </summary>
     public bool CanTakeInput(ProjectInfo project) =>
-        project.Status is { State: ProjectState.Idle, CurrentQuestion: null } && project.Process.OldestPending == null
+        project.Status is { State: ProjectState.Idle, CurrentQuestion: null, RateLimited: null } && project.Process.OldestPending == null
         && !project.Process.Stopping && !project.Process.Launching && IsRunning(project);
 
     // ── State ──
@@ -689,6 +693,11 @@ public sealed class ProjectLifecycle
             {
                 // In memory only: status.json carries it when something else changes, and recovery reads it from the file
                 if (offset is { } persisted) project.Status = project.Status with { OutputOffset = persisted };
+                if (RateLimitInfo.Parse(jsonLine) is { } rateLimit)
+                {
+                    if (statusChanged = ObserveRateLimit(project, rateLimit)) await SaveStatusAsync(project);
+                    return;
+                }
                 if (ParseClaudeOutput(jsonLine) is not { } outputEvent) return;
                 var previous = project.Status.State;
                 statusChanged = await _statusUpdater.UpdateFromOutputEventAsync(project, outputEvent, jsonLine);
@@ -717,6 +726,27 @@ public sealed class ProjectLifecycle
             try { await OnProjectCompleted(id); }
             catch (Exception ex) { _logger.LogError(ex, "Error in OnProjectCompleted handler for project {ProjectId}", id); }
         }
+    }
+
+    /// <summary>
+    /// What claude said of its account's rate limit (issue #596), under the state lock: the account's tracker takes it in,
+    /// and a rejection is kept for the turn's error result, which is then the limit's stop (<see cref="StatusUpdater"/>).
+    /// The rejection that marks the account limited makes its session the one that tells of it
+    /// (<see cref="ProjectStatus.AccountNotice"/>). True when the status changed.
+    /// </summary>
+    private bool ObserveRateLimit(ProjectInfo project, RateLimitInfo info)
+    {
+        var now = DateTime.UtcNow;
+        if (info.IsRejected) project.Process.Rejected(info);
+        if (AccountLimits.Observe(project.ConfigDir ?? "", info, project.Status.Id, now) is not { } started) return false;
+        _logger.LogWarning("Project {ProjectId} hit its account's {Window} rate limit ({Account}); it resets at {Until:u}",
+            project.Status.Id, info.Window ?? "usage", project.ConfigDir, started.Until);
+        project.Status = project.Status with
+        {
+            AccountNotice = new AccountNotice(now, RateLimitTexts.Hit(project.Status.ProfileName, started.Window, started.Until, now)),
+            UpdatedAt = now,
+        };
+        return true;
     }
 
     /// <summary>The <c>type</c> of the line claude writes when <c>/clear</c> starts a new conversation.</summary>

@@ -55,6 +55,8 @@ public class StatusUpdater : IStatusUpdater
         // Every other result ends the turn the user's input started, if one did: a reply sent while the recap runs is
         // the turn after it
         var userTurn = outputEvent.Type == OutputEventType.Result && !recapTurn && process.TakeUserTurn();
+        // The account's rate limit refused this turn (issue #596): its error result is the limit's stop, not the turn's end
+        var rejection = outputEvent.Type == OutputEventType.Result ? process.TakeRejection() : null;
         // The compaction the session asked for (issue #579), which this result moves on: a stop's drops it (ProjectLifecycle)
         var compaction = outputEvent.Type == OutputEventType.Result && !process.Stopping ? process.Compaction : null;
         // claude is done with a /compact, whoever sent it: the compact tool may be called again
@@ -122,6 +124,24 @@ public class StatusUpdater : IStatusUpdater
             case OutputEventType.Result when IsErrorResult(outputEvent) && process.Stopping:
                 process.LastAssistantText = null;
                 process.ForgetSpoken();
+                break;
+
+            // The account's rate limit stopped the turn (issue #596): claude waits, idle, and the server sends it on at the
+            // reset (ProjectManager). Nobody is told the turn finished or failed: the last result and error stay as they were,
+            // and the account tells of its limit once (ProjectStatus.AccountNotice). What the user sent meanwhile stays held
+            case OutputEventType.Result when IsErrorResult(outputEvent) && rejection is { ResetsAt: { } until }:
+                status = WithTokenMetrics(status with
+                {
+                    State = ProjectState.Idle,
+                    CurrentQuestion = null,
+                    RateLimited = new RateLimitHold(until, rejection.Window, status.RateLimited?.Since ?? DateTime.UtcNow, Stopped: true,
+                        Held: status.RateLimited?.Held),
+                }, outputEvent);
+                process.LastAssistantText = null;
+                process.ForgetSpoken();
+                stateChanged = true;
+                _logger.LogInformation("Project {ProjectId} was stopped by its account's {Window} rate limit; it is sent on after {Until:u}",
+                    project.Status.Id, rejection.Window ?? "usage", until);
                 break;
 
             // The compaction the session asked for is done, or failed (issue #579): its continuation is sent at once

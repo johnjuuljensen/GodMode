@@ -211,6 +211,51 @@ public sealed class FakeScript
         }));
 
     /// <summary>
+    /// A <c>rate_limit_event</c> (issue #596), as claude 2.1 writes it: the account's <paramref name="window"/> limit at
+    /// <paramref name="status"/> (<c>allowed_warning</c>, <c>rejected</c>), resetting at <paramref name="resetsAt"/>.
+    /// </summary>
+    public FakeScript EmitRateLimit(DateTimeOffset resetsAt, string status = "rejected", string window = "five_hour") =>
+        Emit(Json(new
+        {
+            type = "rate_limit_event",
+            rate_limit_info = new Dictionary<string, object>
+            {
+                ["status"] = status,
+                ["resetsAt"] = resetsAt.ToUnixTimeSeconds(),
+                ["rateLimitType"] = window,
+                ["unifiedWindows"] = new Dictionary<string, object>
+                {
+                    [window] = new { utilization = status == "rejected" ? 1.0 : 0.8, resetsAt = resetsAt.ToUnixTimeSeconds() },
+                },
+            },
+            session_id = SessionIdPlaceholder,
+        }));
+
+    /// <summary>
+    /// The account's limit stops the turn (issue #596), as claude writes it: the rejection, its synthetic reply, and the
+    /// turn's error result.
+    /// </summary>
+    public FakeScript EmitRateLimitStop(DateTimeOffset resetsAt, string window = "five_hour") =>
+        EmitRateLimit(resetsAt, window: window)
+            .Emit(Json(new
+            {
+                type = "assistant",
+                message = new { model = "<synthetic>", role = "assistant", content = new[] { new { type = "text", text = "You've hit your session limit" } } },
+                session_id = SessionIdPlaceholder,
+            }))
+            .Emit(Json(new
+            {
+                type = "result",
+                subtype = "success",
+                is_error = true,
+                result = "You've hit your session limit",
+                duration_ms = 10,
+                total_cost_usd = 0.0,
+                usage = new { input_tokens = 0, output_tokens = 0 },
+                session_id = SessionIdPlaceholder,
+            }));
+
+    /// <summary>
     /// <c>system/background_tasks_changed</c>: the whole list of what claude runs in the background, each task as
     /// <c>(task_id, task_type, description)</c>; none when the last has ended.
     /// </summary>
