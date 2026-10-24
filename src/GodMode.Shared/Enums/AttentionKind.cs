@@ -46,4 +46,12 @@ public enum AttentionKind
     /// A quiet turn's end raises none (<see cref="Models.ProjectStatus.QuietResult"/>).
     /// </summary>
     Finished,
+
+    /// <summary>
+    /// The account's rate limit stopped its sessions, or has reset (issue #596): one item per account, on the session that
+    /// tells of it (<see cref="Models.ProjectStatus.AccountNotice"/>), not one per session it stopped. The server resumes
+    /// them itself at the reset; nothing needs an answer. Cleared by <see cref="Hubs.IProjectHub.MarkSeen"/>, and by the
+    /// session's next result.
+    /// </summary>
+    RateLimited,
 }
