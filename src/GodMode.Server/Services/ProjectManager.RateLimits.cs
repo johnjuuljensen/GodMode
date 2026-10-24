@@ -89,7 +89,16 @@ public partial class ProjectManager
             return;
         }
 
-        await _lifecycle.UpdateStatusAsync(project, status => status with { RateLimited = null, UpdatedAt = now });
+        // The hold is taken as it is when it is cleared, in one update under the state lock: input held since it was read
+        // above goes with it, and a hold the user's stop cleared, or one for a later reset, is left as it is
+        RateLimitHold? taken = null;
+        await _lifecycle.UpdateStatusAsync(project, status =>
+        {
+            taken = status.RateLimited;
+            return taken?.Until == until ? status with { RateLimited = null, UpdatedAt = now } : status;
+        });
+        if (taken?.Until != until) return;
+        hold = taken;
         await TellResetAsync(account, now);
         var input = hold.Held ?? (hold.Stopped ? RateLimitTexts.Continuation : null);
         _logger.LogInformation("Project {ProjectId}: its account's rate limit has reset; {What}", id,
