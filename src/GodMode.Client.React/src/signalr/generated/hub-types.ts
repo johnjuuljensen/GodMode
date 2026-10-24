@@ -169,6 +169,27 @@ export interface AccountNotice {
   Text: string;
 }
 
+/**
+ * What is known of one Claude account's usage (issue #600): its five-hour and weekly (`seven_day`) windows,
+ * from the newest `rate_limit_event` any of the server's sessions on it wrote. Only as fresh as the account's
+ * last turn (ObservedAt): an idle account keeps its last reading, an upper bound. A live reading, not kept
+ * over a restart of the server.
+ */
+export interface AccountUsage {
+  /**
+   * The account's key, one per Claude config dir (`CLAUDE_CONFIG_DIR`), which ProjectRootInfo.Account and
+   * ProfileInfo.Account name. Opaque, and per server: two servers' keys are not comparable.
+   */
+  Account: string;
+  /** What the account is shown as: its config dir's folder name (`.claude-private`). */
+  Name: string;
+  /** The five-hour window; null when claude has not reported one. */
+  FiveHour?: UsageWindow | null;
+  /** The weekly window; null when claude has not reported one. */
+  SevenDay?: UsageWindow | null;
+  ObservedAt: string;
+}
+
 /** Request to add or update a GodMode server registration. */
 export interface AddServerRequest {
   DisplayName: string;
@@ -482,6 +503,13 @@ export interface ProfileInfo {
   Name: string;
   /** Optional description of the profile. */
   Description?: string | null;
+  /**
+   * The Claude account its sessions run on (issue #600), by its environment's `CLAUDE_CONFIG_DIR`: the key of
+   * its AccountUsage. A root of it whose own environment names another has its own ProjectRootInfo.Account.
+   */
+  Account?: string | null;
+  /** Its usage ceiling (`Profiles:<name>:UsageCeiling`); null when it has none. */
+  UsageCeiling?: UsageCeiling | null;
 }
 
 /** Metrics about a project's Claude usage. */
@@ -502,6 +530,9 @@ export interface ProjectMetrics {
  * Client-facing information about a project root directory. No server paths exposed — only name, description,
  * and available create actions. ProjectRootInfo.Name is the root's key (in IDs, CreateProject, fleet tools);
  * ProjectRootInfo.Title is what a client shows for it, null when the root has none and its name is shown.
+ * ProjectRootInfo.Account is the Claude account its sessions run on (issue #600), the key of its
+ * AccountUsage; ProjectRootInfo.UsageCeiling is its ceiling, its own over its profile's, null when it has
+ * none.
  */
 export interface ProjectRootInfo {
   Name: string;
@@ -509,6 +540,8 @@ export interface ProjectRootInfo {
   Actions?: CreateActionInfo[] | null;
   ProfileName?: string | null;
   Title?: string | null;
+  Account?: string | null;
+  UsageCeiling?: UsageCeiling | null;
 }
 
 /** Detailed status information about a project. */
@@ -937,6 +970,26 @@ export interface UnmanagedFolder {
 }
 
 /**
+ * A usage ceiling (issue #600), per window, each 0 to 1: at or above it, no session starts or resumes in the
+ * root, and the fleet starts none. Null for a window sets none. A root's (its `config.json`'s `usageCeiling`)
+ * wins over its profile's (`Profiles:<name>:UsageCeiling`), window by window.
+ */
+export interface UsageCeiling {
+  FiveHour?: number | null;
+  SevenDay?: number | null;
+}
+
+/**
+ * One usage window of a Claude account (issue #600), as claude last reported it: how much of it is used, 0 to
+ * 1, and when it resets. A window whose ResetsAt has passed has reset: it is 0 until the account's next turn
+ * says more.
+ */
+export interface UsageWindow {
+  Utilization: number;
+  ResetsAt?: string | null;
+}
+
+/**
  * How far a project's work has got, as its root's `status` script last reported it (ProjectStatus.Progress,
  * issue #545): an epic's sub-issues resolved, out of all of them. The script decides what a unit is and when
  * it counts as resolved; the server only holds `0 <= Resolved <= Total`.
@@ -954,6 +1007,12 @@ export interface IProjectHub {
   ListProfiles(): Promise<ProfileInfo[]>;
   /** Lists all available project roots with their input schemas. */
   ListProjectRoots(): Promise<ProjectRootInfo[]>;
+  /**
+   * The usage of every Claude account this server's sessions have reported on since it started (issue #600),
+   * one per account; ProjectRootInfo.Account and ProfileInfo.Account say whose a root's or profile's is.
+   * IProjectHubClient.UsageChanged pushes the same list whenever a reading changes.
+   */
+  GetUsage(): Promise<AccountUsage[]>;
   /** Lists all projects. */
   ListProjects(): Promise<ProjectSummary[]>;
   /** Gets the status of a specific project. */
@@ -1169,4 +1228,9 @@ export interface IProjectHubClient {
    * IProjectHubClient.ProjectCreated and IProjectHubClient.ProjectDeleted.
    */
   RootsChanged(roots: ProjectRootInfo[], profiles: ProfileInfo[]): void;
+  /**
+   * An account's usage reading changed (issue #600): usage is the whole list, as IProjectHub.GetUsage returns
+   * it.
+   */
+  UsageChanged(usage: AccountUsage[]): void;
 }

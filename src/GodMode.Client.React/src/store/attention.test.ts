@@ -30,6 +30,7 @@ class FakeHub {
   async listProjects() { return []; }
   async listProjectRoots() { return []; }
   async listProfiles() { return []; }
+  async getUsage() { return []; }
   async getAttention() { return this.attention; }
 }
 
@@ -50,7 +51,7 @@ async function connect(a: AttentionItem[], b: AttentionItem[]) {
   const conn = (id: string, hub: FakeHub): ServerConnection => ({
     serverInfo: { Id: id, Name: `Server ${id}`, Type: 'local', State: 'Running' } as ServerInfo,
     hub: hub as unknown as ServerConnection['hub'],
-    connectionState: 'disconnected', projects: [], roots: [], profiles: [],
+    connectionState: 'disconnected', projects: [], roots: [], profiles: [], usage: [],
   });
   useAppStore.setState({ serverConnections: [conn('A', hubA), conn('B', hubB)] });
   await useAppStore.getState().connectServer('A');

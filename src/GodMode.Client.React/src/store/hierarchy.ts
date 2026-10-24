@@ -4,7 +4,7 @@
  * is from, so a profile's group may mix servers.
  */
 import type { GodModeHub, ConnectionState } from '../signalr/hub';
-import type { ProjectSummary, ProjectRootInfo, ProfileInfo, ServerInfo } from '../signalr/types';
+import type { AccountUsage, ProjectSummary, ProjectRootInfo, ProfileInfo, ServerInfo } from '../signalr/types';
 import { projectKey, type ProjectKey } from './projectKey';
 
 /** What the sidebar lists under each profile: the profile is always the top level (#308). */
@@ -19,6 +19,8 @@ export interface ServerConnection {
   projects: ProjectSummary[];
   roots: ProjectRootInfo[];
   profiles: ProfileInfo[];
+  /** Its accounts' usage readings (#600), which its roots and profiles name by ProjectRootInfo.Account and ProfileInfo.Account. */
+  usage: AccountUsage[];
 }
 
 /** A project as the sidebar lists it: selecting it selects (serverId, project.Id). */
