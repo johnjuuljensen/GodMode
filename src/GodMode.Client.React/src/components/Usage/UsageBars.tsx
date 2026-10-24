@@ -3,17 +3,11 @@ import type { AccountUsage, UsageCeiling, UsageWindow } from '../../signalr/type
 import { useAppStore } from '../../store';
 import { isListed, profileNameOf, sameProfile } from '../../store/hierarchy';
 import { resetTime } from '../RateLimit/resetTime';
+import { windowUse } from './windowUse';
 import './Usage.css';
 
 /** How often the bars look again at whether a window has reset. */
 const RESET_TICK_MS = 60_000;
-
-/** A window as the bar shows it: used, 0 to 1, and when it resets; 0 and reset once its reset has passed. */
-export function windowUse(window: UsageWindow | null | undefined, now: number): { used: number; reset: boolean } | null {
-  if (!window) return null;
-  const reset = !!window.ResetsAt && new Date(window.ResetsAt).getTime() <= now;
-  return { used: reset ? 0 : Math.min(Math.max(window.Utilization, 0), 1), reset };
-}
 
 const percent = (fraction: number) => `${Math.round(fraction * 100)}%`;
 
