@@ -14,10 +14,11 @@ namespace GodMode.Server.Tests.Lifecycle;
 /// <param name="Roots">The roots a RootsChanged pushed.</param>
 /// <param name="Profiles">The profiles a RootsChanged pushed.</param>
 /// <param name="Message">A CreationProgress's line of script output.</param>
+/// <param name="Usage">The accounts' usage a UsageChanged pushed.</param>
 internal sealed record HubPush(string Method, string? ProjectId, ProjectStatus? Status = null, string? RawJson = null,
     long? Offset = null, IReadOnlyList<OutputLine>? Lines = null, IReadOnlyList<AttentionItem>? Attention = null,
     string? SubscriptionId = null, string? Generation = null,
-    IReadOnlyList<ProjectRootInfo>? Roots = null, IReadOnlyList<ProfileInfo>? Profiles = null, string? Message = null);
+    IReadOnlyList<ProjectRootInfo>? Roots = null, IReadOnlyList<ProfileInfo>? Profiles = null, string? Message = null, IReadOnlyList<AccountUsage>? Usage = null);
 
 /// <summary>
 /// Stands in for the server's hub context: every push to any client is recorded, in order, as a
@@ -147,6 +148,7 @@ internal sealed class RecordingHubContext : IHubContext<ProjectHub, IProjectHubC
         public Task ProjectDeleted(string projectId) => Done(new HubPush(nameof(ProjectDeleted), projectId));
         public Task RootsChanged(ProjectRootInfo[] roots, ProfileInfo[] profiles) =>
             Done(new HubPush(nameof(RootsChanged), null, Roots: roots, Profiles: profiles));
+        public Task UsageChanged(AccountUsage[] usage) => Done(new HubPush(nameof(UsageChanged), null, Usage: usage));
 
         private Task Done(HubPush push) => hub.Record(push, recipients());
     }
