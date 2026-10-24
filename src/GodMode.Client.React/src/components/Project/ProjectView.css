@@ -279,3 +279,9 @@
   color: var(--error);
   border-top: var(--border-width) var(--border-style) var(--glass-border);
 }
+
+/* A session being deleted (#599): what its delete script says, under the header */
+.project-deleting {
+  padding: 8px 16px;
+  border-bottom: var(--border-width) var(--border-style) var(--glass-border);
+}

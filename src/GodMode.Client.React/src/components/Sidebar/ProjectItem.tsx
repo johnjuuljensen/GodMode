@@ -201,7 +201,7 @@ export function ProjectItem({ item, isSelected, onSelect, nested }: Props) {
         )}
       </div>
       {/* Out of the sidebar: its backdrop-filter makes it the containing block of a fixed menu, and its overflow clips it */}
-      {menu && createPortal(
+      {menu && !deleting && createPortal(
         <div ref={menuRef} className="project-item-menu" role="menu" style={{ left: menu.x, top: menu.y }} onClick={e => e.stopPropagation()}>
           {IMPORTANCE_ORDER.map(tier => (
             <button
