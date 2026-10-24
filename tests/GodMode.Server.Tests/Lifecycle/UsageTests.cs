@@ -21,14 +21,14 @@ public class UsageTests
         new FakeScript().EmitInit().AwaitStdin().EmitUser("Say hello", echo: true)
             .EmitRateLimit(resetsAt, status: "allowed_warning").EmitResult("done").AwaitStdin();
 
-    /// <summary>The root's config.json with its <c>usageCeiling</c> set to <paramref name="fiveHour"/>.</summary>
-    private static Dictionary<string, object> Ceiling(double fiveHour) => new() { ["usageCeiling"] = new { fiveHour } };
+    /// <summary>The root's config.json with its <c>usageCeiling</c> set to <paramref name="session"/>.</summary>
+    private static Dictionary<string, object> Ceiling(double session) => new() { ["usageCeiling"] = new { session } };
 
-    private static void SetCeiling(LifecycleHarness harness, double fiveHour)
+    private static void SetCeiling(LifecycleHarness harness, double session)
     {
         var path = Path.Combine(harness.RootPath, ".godmode-root", "config.json");
         var config = JsonNode.Parse(File.ReadAllText(path))!.AsObject();
-        config["usageCeiling"] = new JsonObject { ["fiveHour"] = fiveHour };
+        config["usageCeiling"] = new JsonObject { ["session"] = session };
         File.WriteAllText(path, config.ToJsonString());
     }
 
@@ -48,9 +48,9 @@ public class UsageTests
         await harness.CreateProjectAsync();
 
         var usage = await WaitForReadingAsync(harness);
-        Assert.Equal(0.8, usage.FiveHour!.Utilization);
-        Assert.Equal(DateTimeOffset.FromUnixTimeSeconds(resetsAt.ToUnixTimeSeconds()).UtcDateTime, usage.FiveHour.ResetsAt);
-        Assert.Null(usage.SevenDay);
+        Assert.Equal(0.8, usage.Session!.Utilization);
+        Assert.Equal(DateTimeOffset.FromUnixTimeSeconds(resetsAt.ToUnixTimeSeconds()).UtcDateTime, usage.Session.ResetsAt);
+        Assert.Null(usage.Weekly);
         Assert.Equal(usage.Account, Assert.Single(await harness.Projects.ListProjectRootsAsync(), r => r.Name == LifecycleHarness.RootName).Account);
         Assert.Equal(usage.Account, Assert.Single(await harness.Projects.ListProfilesAsync(), p => p.Name == LifecycleHarness.ProfileName).Account);
         await LifecycleHarness.WaitUntilAsync(
@@ -65,7 +65,7 @@ public class UsageTests
         // No reading yet: nothing holds
         var first = await harness.CreateProjectAsync("first");
         await WaitForReadingAsync(harness);
-        Assert.Equal(new UsageCeiling(FiveHour: 0.7), Assert.Single(await harness.Projects.ListProjectRootsAsync()).UsageCeiling);
+        Assert.Equal(new UsageCeiling(Session: 0.7), Assert.Single(await harness.Projects.ListProjectRootsAsync()).UsageCeiling);
 
         var refused = await Assert.ThrowsAsync<InvalidOperationException>(() => harness.CreateProjectAsync("second"));
         Assert.Contains("holds its work", refused.Message);
@@ -96,7 +96,7 @@ public class UsageTests
     [Fact]
     public async Task AProfilesCeiling_HoldsItsRoots_AndTheFleetsStartSessionIsRefused()
     {
-        var instanceConfig = $$"""{ "Profiles": { "{{FleetRun.Profile}}": { "UsageCeiling": { "FiveHour": 70 } } } }""";
+        var instanceConfig = $$"""{ "Profiles": { "{{FleetRun.Profile}}": { "UsageCeiling": { "Session": 70 } } } }""";
         await using var run = await FleetRun.StartAsync(Reports(In(TimeSpan.FromHours(3))), instanceConfig);
         await run.CreateOverHubAsync("first");
         await LifecycleHarness.WaitUntilAsync(

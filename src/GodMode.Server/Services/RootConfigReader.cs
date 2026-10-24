@@ -122,7 +122,7 @@ public class RootConfigReader : IRootConfigReader
             List: NormalizeScriptPaths(baseRaw.List, godModeRootPath) is [var list] ? list : null,
             Environment: baseRaw.Environment,
             IssueInfo: NormalizeScriptPaths(baseRaw.IssueInfo, godModeRootPath) is [var issueInfo] ? issueInfo : null,
-            UsageCeiling: baseRaw.UsageCeiling is { } ceiling ? UsageCeiling.Of(ceiling.FiveHour, ceiling.SevenDay) : null,
+            UsageCeiling: baseRaw.UsageCeiling is { } ceiling ? UsageCeiling.Of(ceiling.Session, ceiling.Weekly) : null,
             // Never created or launched from: only what an existing session's scripts run with
             Base: new CreateAction(BaseConfigFileName,
                 Delete: NormalizeScriptPaths(baseRaw.Delete, godModeRootPath),

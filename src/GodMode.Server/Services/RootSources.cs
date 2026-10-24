@@ -22,7 +22,7 @@ public sealed record RootSources(
     public const string ScanSection = "Roots:Scan";
     public const string ExplicitSection = "Roots:Explicit";
     public const string ProfilesSection = "Profiles";
-    /// <summary>A profile's usage ceiling (issue #600), <c>Profiles:&lt;name&gt;:UsageCeiling:FiveHour</c> and <c>:SevenDay</c>.</summary>
+    /// <summary>A profile's usage ceiling (issue #600), <c>Profiles:&lt;name&gt;:UsageCeiling:Session</c> and <c>:Weekly</c>.</summary>
     public const string CeilingSection = "UsageCeiling";
 
     /// <summary>The server's root sources in <paramref name="config"/>: scan folders and explicit roots in ordinal order of their keys.</summary>
@@ -46,7 +46,7 @@ public sealed record RootSources(
                 profile.GetSection("Environment").GetChildren()
                     .Where(variable => variable.Value != null)
                     .ToDictionary(variable => variable.Key, variable => variable.Value!),
-                UsageCeiling.Of(profile.GetSection(CeilingSection).GetValue<double?>("FiveHour"), profile.GetSection(CeilingSection).GetValue<double?>("SevenDay"))),
+                UsageCeiling.Of(profile.GetSection(CeilingSection).GetValue<double?>("Session"), profile.GetSection(CeilingSection).GetValue<double?>("Weekly"))),
             StringComparer.OrdinalIgnoreCase));
 
     /// <summary>

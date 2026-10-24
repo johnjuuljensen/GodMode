@@ -170,10 +170,10 @@ export interface AccountNotice {
 }
 
 /**
- * What is known of one Claude account's usage (issue #600): its five-hour and weekly (`seven_day`) windows,
- * from the newest `rate_limit_event` any of the server's sessions on it wrote. Only as fresh as the account's
- * last turn (ObservedAt): an idle account keeps its last reading, an upper bound. A live reading, not kept
- * over a restart of the server.
+ * What is known of one Claude account's usage (issue #600): its session and weekly windows (claude's
+ * `five_hour` and `seven_day`), from the newest `rate_limit_event` any of the server's sessions on it wrote.
+ * Only as fresh as the account's last turn (ObservedAt): an idle account keeps its last reading, an upper
+ * bound. A live reading, not kept over a restart of the server.
  */
 export interface AccountUsage {
   /**
@@ -183,10 +183,10 @@ export interface AccountUsage {
   Account: string;
   /** What the account is shown as: its config dir's folder name (`.claude-private`). */
   Name: string;
-  /** The five-hour window; null when claude has not reported one. */
-  FiveHour?: UsageWindow | null;
-  /** The weekly window; null when claude has not reported one. */
-  SevenDay?: UsageWindow | null;
+  /** The current session's window (claude's `five_hour`); null when claude has not reported one. */
+  Session?: UsageWindow | null;
+  /** The current week's window (claude's `seven_day`); null when claude has not reported one. */
+  Weekly?: UsageWindow | null;
   ObservedAt: string;
 }
 
@@ -975,8 +975,8 @@ export interface UnmanagedFolder {
  * wins over its profile's (`Profiles:<name>:UsageCeiling`), window by window.
  */
 export interface UsageCeiling {
-  FiveHour?: number | null;
-  SevenDay?: number | null;
+  Session?: number | null;
+  Weekly?: number | null;
 }
 
 /**

@@ -1,4 +1,4 @@
-/* An account's five-hour and weekly usage (#600): two thin bars, stacked, each with its ceiling's mark */
+/* An account's session and weekly usage (#600): two thin bars, stacked, each with its ceiling's mark */
 .usage-bars {
   flex-shrink: 0;
   display: inline-flex;

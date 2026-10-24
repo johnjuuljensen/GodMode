@@ -25,7 +25,7 @@ function Bar({ label, window, ceiling, now }: { label: string; window?: UsageWin
   );
 }
 
-/** One window's line of the tooltip: "Five-hour: 27%, resets 15:50", or "reset" once it has. */
+/** One window's line of the tooltip: "Session: 27%, resets 15:50", or "reset" once it has. */
 function line(label: string, window: UsageWindow | null | undefined, ceiling: number | null | undefined, now: number): string | null {
   const use = windowUse(window, now);
   if (!use) return null;
@@ -35,7 +35,7 @@ function line(label: string, window: UsageWindow | null | undefined, ceiling: nu
 }
 
 /**
- * An account's five-hour and weekly usage (#600), as two thin bars, each with its ceiling's mark: as of the account's last
+ * An account's session and weekly usage (#600), as two thin bars, each with its ceiling's mark: as of the account's last
  * turn, and a window whose reset has passed is empty. Nothing when the account has no reading.
  */
 export function UsageBars({ usage, ceiling }: { usage?: AccountUsage; ceiling?: UsageCeiling | null }) {
@@ -44,16 +44,16 @@ export function UsageBars({ usage, ceiling }: { usage?: AccountUsage; ceiling?: 
     const timer = setInterval(() => setNow(Date.now()), RESET_TICK_MS);
     return () => clearInterval(timer);
   }, []);
-  if (!usage || (!usage.FiveHour && !usage.SevenDay)) return null;
+  if (!usage || (!usage.Session && !usage.Weekly)) return null;
   const title = [
-    line('Five-hour', usage.FiveHour, ceiling?.FiveHour, now),
-    line('Weekly', usage.SevenDay, ceiling?.SevenDay, now),
+    line('Session', usage.Session, ceiling?.Session, now),
+    line('Weekly', usage.Weekly, ceiling?.Weekly, now),
     `${usage.Name}, as of ${resetTime(usage.ObservedAt, new Date(now))}`,
   ].filter(Boolean).join('\n');
   return (
     <span className="usage-bars" title={title}>
-      <Bar label="five-hour" window={usage.FiveHour} ceiling={ceiling?.FiveHour} now={now} />
-      <Bar label="weekly" window={usage.SevenDay} ceiling={ceiling?.SevenDay} now={now} />
+      <Bar label="session" window={usage.Session} ceiling={ceiling?.Session} now={now} />
+      <Bar label="weekly" window={usage.Weekly} ceiling={ceiling?.Weekly} now={now} />
     </span>
   );
 }
