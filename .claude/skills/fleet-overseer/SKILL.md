@@ -653,7 +653,8 @@ where anyone looks when a fault turns up later.
   you adopted, not the user's, not a sibling overseer's: the tool refuses those.
 - **Only what is done.** It is refused while the worker runs or waits on the user, while its pull
   request is draft or open, and while it has children of its own: delete those first. A worker that
-  never made a pull request (a failed start) may go.
+  never made a pull request (a failed start) may go. The delete checks the pull request again before
+  refusing it as open, so delete right after your merge; a refusal names when it read the pull request.
 - **Never forced.** Work not committed or pushed fails the delete script, the error comes back to you,
   and the session stays. Tell the worker, or the user; never clean the worktree yourself to get past
   it.
