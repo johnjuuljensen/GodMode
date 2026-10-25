@@ -1784,6 +1784,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         string? script = null;
         var limit = StatusScriptTimeout;
         PullRequestScript.Report reported;
+        DateTime readAt;
         try
         {
             var snap = _snapshot;
@@ -1798,7 +1799,8 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancel);
             timeout.CancelAfter(limit);
             var output = await _scriptRunner.RunForOutputAsync(script, rootPath, project.ProjectPath, env, PullRequestScript.MaxOutputChars, timeout.Token);
-            reported = PullRequestScript.Parse(output, DateTime.UtcNow);
+            readAt = DateTime.UtcNow;
+            reported = PullRequestScript.Parse(output, readAt);
         }
         catch (OperationCanceledException) when (cancel.IsCancellationRequested)
         {
@@ -1813,6 +1815,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
 
         cancel.ThrowIfCancellationRequested();
         if (!_projects.TryGetValue(projectId, out var current) || current != project) return PullRequestPoller.Outcome.Gone;
+        project.PullRequestReadAt = readAt;
         var before = project.Status.PullRequest;
         var after = PullRequestScript.Apply(before, reported.PullRequest);
         var progressBefore = project.Status.Progress;

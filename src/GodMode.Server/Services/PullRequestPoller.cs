@@ -41,6 +41,35 @@ public sealed class PullRequestPoller : IAsyncDisposable, IDisposable
         public volatile bool Polling;
         public Task Loop = Task.CompletedTask;
         public bool Started;
+
+        /// <summary>Those waiting on a check that starts after they asked (<see cref="CheckAsync"/>); under the entry's lock.</summary>
+        private List<TaskCompletionSource> _waiters = [];
+
+        /// <summary>Whether its loop has ended, so no check comes to answer a waiter; under the entry's lock.</summary>
+        private bool _ended;
+
+        /// <summary>A waiter for the next check, or false when the loop has ended.</summary>
+        public bool AddWaiter(TaskCompletionSource waiter)
+        {
+            lock (this)
+            {
+                if (_ended) return false;
+                _waiters.Add(waiter);
+                return true;
+            }
+        }
+
+        /// <summary>The waiters the next check answers, taken from the list; when <paramref name="end"/>, no more are taken.</summary>
+        public List<TaskCompletionSource> TakeWaiters(bool end = false)
+        {
+            lock (this)
+            {
+                _ended |= end;
+                var taken = _waiters;
+                _waiters = [];
+                return taken;
+            }
+        }
     }
 
     /// <param name="check">Checks the project, logging its own failures; throws only when cancelled.</param>
@@ -84,6 +113,22 @@ public sealed class PullRequestPoller : IAsyncDisposable, IDisposable
             try { entry.Wake.Release(); } catch (SemaphoreFullException) { }
     }
 
+    /// <summary>
+    /// Checks the project as <see cref="CheckNow"/> does, and waits for that check: one that starts after this was
+    /// asked, never one already running. Ends at once when the server is stopping, and when the project is forgotten.
+    /// </summary>
+    public Task CheckAsync(string projectId)
+    {
+        if (_stopping.IsCancellationRequested) return Task.CompletedTask;
+        var entry = _entries.GetOrAdd(projectId, _ => new Entry(_stopping.Token));
+        var waiter = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        if (!entry.AddWaiter(waiter)) return Task.CompletedTask;
+        CheckNow(projectId);
+        // Stopped before a loop started: none answers it
+        if (_stopping.IsCancellationRequested) waiter.TrySetResult();
+        return waiter.Task;
+    }
+
     /// <summary>Stops checking the project, and waits for a check that is running to end (its script is killed).</summary>
     public async Task ForgetAsync(string projectId)
     {
@@ -108,8 +153,13 @@ public sealed class PullRequestPoller : IAsyncDisposable, IDisposable
 
                 Outcome outcome;
                 await _concurrency.WaitAsync(cancel);
+                var waiters = entry.TakeWaiters();
                 try { outcome = await _check(projectId, cancel); }
-                finally { _concurrency.Release(); }
+                finally
+                {
+                    _concurrency.Release();
+                    foreach (var waiter in waiters) waiter.TrySetResult();
+                }
 
                 if (outcome == Outcome.Gone)
                 {
@@ -125,6 +175,10 @@ public sealed class PullRequestPoller : IAsyncDisposable, IDisposable
             // The check logs its own failures: this is a bug, and the project is no longer checked
             _logger.LogError(ex, "Pull request checks of project {ProjectId} stopped", projectId);
             _entries.TryRemove(KeyValuePair.Create(projectId, entry));
+        }
+        finally
+        {
+            foreach (var waiter in entry.TakeWaiters(end: true)) waiter.TrySetResult();
         }
     }
 

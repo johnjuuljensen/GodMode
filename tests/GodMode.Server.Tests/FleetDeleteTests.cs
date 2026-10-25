@@ -69,10 +69,10 @@ public class FleetDeleteTests
         public McpClient Overseer { get; private init; } = null!;
         public ConcurrentQueue<string> Deleted { get; } = new();
 
-        public static async Task<Fleet> StartAsync()
+        /// <param name="pollSeconds">How often an open pull request is checked again: every second, unless a test needs the poll out of the way.</param>
+        public static async Task<Fleet> StartAsync(int pollSeconds = 1)
         {
-            // An open pull request is checked again every second
-            return await (await FleetRun.StartAsync(Waiting(), $$"""{ "{{ProjectManager.PullRequestPollSetting}}": 1 }""")).SetUpAsync(async run =>
+            return await (await FleetRun.StartAsync(Waiting(), $$"""{ "{{ProjectManager.PullRequestPollSetting}}": {{pollSeconds}} }""")).SetUpAsync(async run =>
             {
                 File.WriteAllText(Path.Combine(run.RootPath, ".godmode-root", "delete.ps1"), DeleteScript);
                 File.WriteAllText(Path.Combine(run.RootPath, ".godmode-root", "status.ps1"), StatusScript);
@@ -267,6 +267,36 @@ public class FleetDeleteTests
 
         Report("merged");
         await ReportedAsync(child, PullRequestState.Merged);
+        await fleet.DeleteAsync(child);
+        Assert.DoesNotContain(child, await fleet.IdsAsync());
+    }
+
+    /// <summary>
+    /// A pull request merged since the last check (an overseer's own merge, with gh) is checked again by the delete, not
+    /// left to the poll, which an Idle worker's lack of transitions leaves to its interval (issue #609). The refusal says
+    /// when the reading was taken: by the check just run, or, when that failed, when the state was first seen.
+    /// </summary>
+    [Fact]
+    public async Task AChildWhosePullRequestWasJustMerged_IsDeleted_WithoutWaitingForThePoll()
+    {
+        await using var fleet = await Fleet.StartAsync(pollSeconds: 3600);
+        var prFile = Path.Combine(fleet.Run.RootPath, PullRequestFile);
+        void Report(string state) => File.WriteAllText(prFile,
+            $$$"""{"pullRequest": {"url": "https://github.com/o/r/pull/12", "number": 12, "state": "{{{state}}}", "review": "none"}}""");
+
+        Report("open");
+        var child = await fleet.IdleChildAsync(fleet.Overseer, "worker");
+        await fleet.Run.Client.WaitForAsync(child, s => s.PullRequest?.State == PullRequestState.Open, fleet.Run.Server);
+
+        Assert.Contains("as its status check read it just now", await fleet.RefusedAsync(child));
+
+        // A check that fails leaves the stored reading, and the refusal says how old it is
+        File.WriteAllText(prFile, "not json");
+        var refused = await fleet.RefusedAsync(child);
+        Assert.Contains("is open, as read at", refused);
+        Assert.Contains("a check just now failed", refused);
+
+        Report("merged");
         await fleet.DeleteAsync(child);
         Assert.DoesNotContain(child, await fleet.IdsAsync());
     }

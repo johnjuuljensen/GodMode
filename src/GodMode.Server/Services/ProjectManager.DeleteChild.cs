@@ -22,8 +22,14 @@ public partial class ProjectManager
         if (!IsDescendantOf(project, callerId))
             throw new InvalidOperationException($"Session {projectId} is not one you started, nor one your children started: a session deletes its own children alone.");
 
+        // A pull request merged since the last check (by the overseer, with gh) makes no transition of an Idle worker,
+        // so the poll would see it only after its interval: a refusal over an open one checks it now (issue #609)
+        var checkedAt = WhyNotDoneButPullRequest(project) == null && project.Status.PullRequest is { IsOpen: true }
+            ? await CheckPullRequestNowAsync(project)
+            : null;
+
         // Checked under the lock the delete takes, so no launch comes between the check and the delete
-        return await WhileDeletingAsync(project, () => WithTrackedLockAsync(project, () => WhyNotDone(project) is { } why
+        return await WhileDeletingAsync(project, () => WithTrackedLockAsync(project, () => WhyNotDone(project, checkedAt) is { } why
             ? throw new InvalidOperationException($"Session {projectId} is not deleted: {why}.")
             : DeleteLockedAsync(project, force: false)));
     }
@@ -38,8 +44,32 @@ public partial class ProjectManager
         return false;
     }
 
-    /// <summary>Why the session is not done with, for an overseer's delete; null when it is.</summary>
-    private string? WhyNotDone(ProjectInfo project)
+    /// <summary>
+    /// Runs the project's status check now, one at a time with the poll's, and says when it read the pull request;
+    /// null when it failed, and the stored reading stands.
+    /// </summary>
+    private async Task<DateTime?> CheckPullRequestNowAsync(ProjectInfo project)
+    {
+        var asked = DateTime.UtcNow;
+        await _pullRequests.CheckAsync(project.Status.Id);
+        return project.PullRequestReadAt is { } readAt && readAt >= asked ? readAt : null;
+    }
+
+    /// <summary>
+    /// Why the session is not done with, for an overseer's delete; null when it is. An open pull request is named with
+    /// when it was read: <paramref name="checkedAt"/>, the check the delete just ran, else when it was first seen open.
+    /// </summary>
+    private string? WhyNotDone(ProjectInfo project, DateTime? checkedAt) =>
+        WhyNotDoneButPullRequest(project) ?? (project.Status.PullRequest is { IsOpen: true } pr
+            ? $"its pull request {pr.Url} is {pr.State.ToString().ToLowerInvariant()}, "
+              + (checkedAt is { } at
+                  ? $"as its status check read it just now ({at:yyyy-MM-ddTHH:mm:ssZ})"
+                  : $"as read at {pr.ChangedAt:yyyy-MM-ddTHH:mm:ssZ}, when it was first seen so (a check just now failed)")
+              + "; delete it once the pull request is merged or closed"
+            : null);
+
+    /// <summary>Why the session is not done with, but for its pull request.</summary>
+    private string? WhyNotDoneButPullRequest(ProjectInfo project)
     {
         var status = project.Status;
         // An AskUserQuestion reaches the server as a permission prompt: the question first
@@ -52,10 +82,6 @@ public partial class ProjectManager
         var children = _projects.Values
             .Where(other => !ReferenceEquals(other, project) && ServerParentOf(other) == status.Id)
             .Select(other => other.Status.Id).Order(StringComparer.Ordinal).ToArray();
-        if (children.Length > 0)
-            return $"it has sessions of its own ({string.Join(", ", children)}); delete them first";
-        if (status.PullRequest is { IsOpen: true } pr)
-            return $"its pull request {pr.Url} is {pr.State.ToString().ToLowerInvariant()}; delete it once the pull request is merged or closed";
-        return null;
+        return children.Length > 0 ? $"it has sessions of its own ({string.Join(", ", children)}); delete them first" : null;
     }
 }

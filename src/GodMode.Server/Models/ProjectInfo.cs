@@ -100,6 +100,12 @@ public class ProjectInfo
     public bool QuietTurns { get; set; }
 
     /// <summary>
+    /// When its root's status script last reported on it, whatever it reported; null before the first such report on
+    /// this server. <see cref="PullRequestStatus.ChangedAt"/> is when the pull request's state was first seen, not last read.
+    /// </summary>
+    public DateTime? PullRequestReadAt { get; set; }
+
+    /// <summary>
     /// The token the project's claude calls GodMode's MCP endpoint with. Issued afresh for every
     /// launch, handed to claude only in its MCP config file, and cleared when that launch's process exits.
     /// </summary>
