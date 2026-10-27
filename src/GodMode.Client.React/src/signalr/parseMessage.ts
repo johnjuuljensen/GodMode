@@ -38,6 +38,7 @@ export function parseClaudeMessage(rawJson: string): ClaudeMessage {
   const isError = type === 'error' || (type === 'result' && root.is_error === true);
   const marker = commandMarker(type, subtype);
   const commandNote = noteOf(root, type, contentItems, summary, isError);
+  const timestamp = asString(root.timestamp);
   return {
     type,
     subtype,
@@ -50,6 +51,7 @@ export function parseClaudeMessage(rawJson: string): ClaudeMessage {
     contentSummary: buildContentSummary(contentItems),
     ...(marker ? { marker } : {}),
     ...(commandNote ? { commandNote } : {}),
+    ...(timestamp ? { timestamp } : {}),
   };
 }
 
@@ -226,8 +228,9 @@ export interface ToolCallItem {
 /** One row of a transcript. `key` is stable for the life of the transcript, for React. */
 export type TranscriptItem =
   /** `pending`: sent from this page and not echoed by claude yet, or never taken by it (#383) */
-  | { kind: 'userText'; key: string; text: string; pending?: 'waiting' | 'notTaken' }
-  | { kind: 'assistantText'; key: string; text: string }
+  /** `timestamp`: when claude wrote the line, if it says (ISO 8601) */
+  | { kind: 'userText'; key: string; text: string; pending?: 'waiting' | 'notTaken'; timestamp?: string }
+  | { kind: 'assistantText'; key: string; text: string; timestamp?: string }
   | { kind: 'thinking'; key: string; text: string }
   | ToolCallItem
   | { kind: 'system'; key: string; label: string; summary: string; isError: boolean }
@@ -336,7 +339,9 @@ function messageItems(message: ClaudeMessage, key: string): (TranscriptItem | At
         const itemKey = `${key}.${j}`;
         switch (c.type) {
           case 'text':
-            return c.text?.trim() ? [{ kind: message.type === 'user' ? 'userText' : 'assistantText', key: itemKey, text: c.text }] : [];
+            return c.text?.trim()
+              ? [{ kind: message.type === 'user' ? 'userText' : 'assistantText', key: itemKey, text: c.text, ...(message.timestamp ? { timestamp: message.timestamp } : {}) }]
+              : [];
           case 'thinking':
             // Redacted thinking has nothing to show
             return c.text?.trim() ? [{ kind: 'thinking', key: itemKey, text: c.text }] : [];

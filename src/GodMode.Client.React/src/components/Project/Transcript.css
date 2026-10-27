@@ -79,6 +79,36 @@
   padding: 6px 0;
 }
 
+/* A reply's copy button (#611): faint, always there, so a phone can reach it */
+.ti-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 2px;
+  padding: 3px 4px;
+  border: none;
+  border-radius: var(--radius-xs);
+  background: none;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  cursor: pointer;
+  opacity: 0.6;
+}
+
+.ti-copy:hover,
+.ti-copy:focus-visible,
+.ti-copy-done {
+  opacity: 1;
+}
+
+.ti-copy:hover {
+  color: var(--text-primary);
+}
+
+.ti-copy-done {
+  color: var(--success, var(--accent));
+}
+
 /* ── Folded rows: tool calls and thinking ── */
 .ti-fold {
   display: flex;
