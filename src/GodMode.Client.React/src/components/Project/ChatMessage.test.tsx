@@ -123,3 +123,55 @@ it('shows my message as mine, as plain text', async () => {
   expect(el.querySelector('.ti-user-bubble')?.textContent).toBe('fix **it** <b>now</b>');
   expect(el.querySelector('b')).toBeNull();
 });
+
+describe('copying a reply (#611)', () => {
+  const markdown = '## Done\n\n- one\n- two';
+
+  it('puts the markdown and the rendered HTML on the clipboard from its button', async () => {
+    const write = vi.fn<(items: ClipboardItem[]) => Promise<void>>(async () => {});
+    vi.stubGlobal('ClipboardItem', class { items: Record<string, Blob>; constructor(items: Record<string, Blob>) { this.items = items; } });
+    Object.defineProperty(navigator, 'clipboard', { value: { write }, configurable: true });
+    try {
+      const el = await show(assistant(markdown));
+      const button = el.querySelector<HTMLButtonElement>('.ti-copy')!;
+      await act(async () => { button.click(); });
+      const { items } = write.mock.calls[0][0][0] as unknown as { items: Record<string, Blob> };
+      expect(await items['text/plain'].text()).toBe(markdown);
+      expect(await items['text/html'].text()).toContain('<li>one</li>');
+      expect(button.getAttribute('aria-label')).toBe('Copied');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('copies a whole selected reply as its markdown, and a part of it as it is', async () => {
+    const el = await show(assistant(markdown));
+    const reply = el.querySelector<HTMLElement>('.markdown')!;
+    const copy = (node: Node) => {
+      window.getSelection()!.selectAllChildren(node);
+      const data = new Map<string, string>();
+      const event = new Event('copy', { bubbles: true, cancelable: true });
+      Object.assign(event, { clipboardData: { setData: (type: string, value: string) => data.set(type, value) } });
+      reply.querySelector('li')!.dispatchEvent(event);
+      return data;
+    };
+    const whole = copy(reply);
+    expect(whole.get('text/plain')).toBe(markdown);
+    expect(whole.get('text/html')).toContain('<h2');
+    expect(copy(reply.querySelector('li')!).size).toBe(0);
+  });
+});
+
+describe("a line's time (#611)", () => {
+  it("is the copy button's and the bubble's tooltip, with the date when it is not today", async () => {
+    const today = new Date();
+    today.setHours(9, 5, 0, 0);
+    const el = await show({ kind: 'assistantText', key: 'a', text: 'Hi', timestamp: today.toISOString() });
+    expect(el.querySelector('.ti-copy')!.getAttribute('title')).toBe('09:05 · Copy as markdown');
+
+    const [user] = buildTranscript([line({ type: 'user', timestamp: '2020-03-04T12:00:00Z', message: { content: [{ type: 'text', text: 'Go' }] } })]);
+    view?.unmount();
+    const bubble = (await show(user)).querySelector('.ti-user-bubble')!;
+    expect(bubble.getAttribute('title')).toMatch(/2020/);
+  });
+});

@@ -51,6 +51,8 @@ export interface ClaudeMessage {
   isError: boolean;
   contentItems: ClaudeContentItem[];
   contentSummary: string;
+  /** When claude wrote the line (its `timestamp`, ISO 8601), on the lines that carry one */
+  timestamp?: string;
   /**
    * What a slash command did to the conversation, shown as a marker across the transcript: claude's
    * `conversation_reset` (/clear) and `system/compact_boundary` (/compact)

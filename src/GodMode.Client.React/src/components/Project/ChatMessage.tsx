@@ -1,9 +1,12 @@
-import { memo, useMemo } from 'react';
+import { memo, useEffect, useMemo, useState } from 'react';
 import type { TranscriptItem, ToolCallItem } from '../../signalr/parseMessage';
 import { Markdown } from './Markdown';
 import { lineDiff, type DiffLine } from './lineDiff';
 import { callStatus, callStatusTitle, resultLine } from './transcriptRow';
 import { keepFocus } from './keepFocus';
+import { copyMarkdown } from './copyMarkdown';
+import { messageTime } from './messageTime';
+import { renderMarkdown } from './renderMarkdown';
 
 // Tool output, or a diff, past this many characters is cut, so one huge result or file cannot stall a row
 const MAX_OUTPUT = 20_000;
@@ -23,7 +26,7 @@ export const ChatMessage = memo(function ChatMessage({ item, expanded, onToggle,
     case 'userText':
       return (
         <div className={`ti ti-user${item.pending ? ` ti-user-${item.pending}` : ''}`}>
-          <div className="ti-user-bubble">{item.text}</div>
+          <div className="ti-user-bubble" title={item.timestamp && messageTime(item.timestamp)}>{item.text}</div>
           {item.pending && (
             <div className="ti-user-pending">{item.pending === 'waiting' ? 'Waiting for claude' : 'Not taken: the session stopped'}</div>
           )}
@@ -33,6 +36,7 @@ export const ChatMessage = memo(function ChatMessage({ item, expanded, onToggle,
       return (
         <div className="ti ti-assistant">
           <Markdown text={item.text} />
+          <CopyReply text={item.text} timestamp={item.timestamp} />
         </div>
       );
     case 'thinking':
@@ -70,6 +74,34 @@ export const ChatMessage = memo(function ChatMessage({ item, expanded, onToggle,
       );
   }
 });
+
+/** A reply's copy button, always shown (a phone has no hover); its tooltip says when claude wrote the reply. */
+function CopyReply({ text, timestamp }: { text: string; timestamp?: string }) {
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const t = setTimeout(() => setCopied(false), 1500);
+    return () => clearTimeout(t);
+  }, [copied]);
+  const time = timestamp && messageTime(timestamp);
+  return (
+    <button
+      type="button"
+      className={`ti-copy${copied ? ' ti-copy-done' : ''}`}
+      aria-label={copied ? 'Copied' : 'Copy reply'}
+      title={time ? `${time} · Copy as markdown` : 'Copy as markdown'}
+      onMouseDown={keepFocus}
+      onClick={async () => setCopied(await copyMarkdown(text, renderMarkdown(text)))}
+    >
+      <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">
+        {copied
+          ? <path d="M2.5 6.5 5 9l4.5-6" />
+          : <><rect x="4" y="4" width="6.5" height="6.5" rx="1" /><path d="M8 4V2.5a1 1 0 0 0-1-1H2.5a1 1 0 0 0-1 1V7a1 1 0 0 0 1 1H4" /></>}
+      </svg>
+      {copied && <span className="ti-copy-label">Copied</span>}
+    </button>
+  );
+}
 
 function Chevron({ open }: { open: boolean }) {
   return (
