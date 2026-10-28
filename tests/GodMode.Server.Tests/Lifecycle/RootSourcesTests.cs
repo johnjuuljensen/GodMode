@@ -85,32 +85,91 @@ public sealed class RootSourcesTests : IDisposable
     }
 
     /// <summary>
-    /// An explicit root's profile is its entry's <c>Profile</c>, else its config.json's <c>profileName</c>, else
-    /// <c>Default</c> (#344): the host's config, which holds the profiles' secrets, picks whose a root gets.
+    /// A root's profile is its config.json's <c>profileName</c>, else <c>WORKSTREAM</c> in the .env files above it
+    /// (the nearer file winning), else its explicit entry's <c>Profile</c>, else <c>Default</c> (#616, which reversed
+    /// #344's entry over <c>profileName</c>): the order of its environment's.
     /// </summary>
     [Fact]
-    public async Task ExplicitRoot_OutsideEveryScanFolder_TakesItsProfileFromTheEntry_ElseFromItsConfig_ElseDefault()
+    public async Task RootProfile_IsItsConfig_ElseTheDotEnvFiles_ElseItsEntry_ElseDefault()
     {
-        WriteRoot(Elsewhere("anywhere", "own"), profile: "from-config");
+        File.WriteAllText(Path.Combine(Directory.CreateDirectory(Elsewhere("tree")).FullName, ".env"), "WORKSTREAM=from-dotenv\n");
+        WriteRoot(Elsewhere("tree", "own"), profile: "from-config");
+        WriteRoot(Elsewhere("tree", "dotenv"));
+        WriteRoot(Elsewhere("tree", "near"));
+        File.WriteAllText(Elsewhere("tree", "near", ".env"), "# the nearer file wins\nexport WORKSTREAM=\"from-near\"\n");
         WriteRoot(Elsewhere("anywhere", "entry"));
         WriteRoot(Elsewhere("anywhere", "config-only"), profile: "from-config");
         WriteRoot(Elsewhere("anywhere", "bare"));
         await using var harness = new LifecycleHarness(Waiting(), settings: new Dictionary<string, string?>
         {
-            // The entry wins over the root's own config.json
-            ["Roots:Explicit:own:Path"] = Elsewhere("anywhere", "own"),
+            ["Roots:Explicit:own:Path"] = Elsewhere("tree", "own"),
             ["Roots:Explicit:own:Profile"] = "from-entry",
+            ["Roots:Explicit:dotenv:Path"] = Elsewhere("tree", "dotenv"),
+            ["Roots:Explicit:dotenv:Profile"] = "from-entry",
+            ["Roots:Explicit:near:Path"] = Elsewhere("tree", "near"),
             ["Roots:Explicit:solo:Path"] = Elsewhere("anywhere", "entry"),
             ["Roots:Explicit:solo:Profile"] = "from-entry",
             ["Roots:Explicit:configured:Path"] = Elsewhere("anywhere", "config-only"),
+            ["Roots:Explicit:configured:Profile"] = "from-entry",
             ["Roots:Explicit:bare:Path"] = Elsewhere("anywhere", "bare"),
         });
 
-        Assert.Equal("from-entry", (await SingleRootAsync(harness, "own")).ProfileName);
+        Assert.Equal("from-config", (await SingleRootAsync(harness, "own")).ProfileName);
+        Assert.Equal("from-dotenv", (await SingleRootAsync(harness, "dotenv")).ProfileName);
+        Assert.Equal("from-near", (await SingleRootAsync(harness, "near")).ProfileName);
         Assert.Equal("from-entry", (await SingleRootAsync(harness, "solo")).ProfileName);
         Assert.Equal("from-config", (await SingleRootAsync(harness, "configured")).ProfileName);
         Assert.Equal("Default", (await SingleRootAsync(harness, "bare")).ProfileName);
         Assert.Contains(await harness.Projects.ListProjectRootsAsync(), root => root.Name == LifecycleHarness.RootName);
+    }
+
+    /// <summary>A .env file's <c>WORKSTREAM</c> is read fresh: changing it moves the root to the profile it names now.</summary>
+    [Fact]
+    public async Task DotEnvWorkstream_IsReadFresh()
+    {
+        var dotEnv = Path.Combine(Directory.CreateDirectory(Elsewhere("fresh")).FullName, ".env");
+        File.WriteAllText(dotEnv, "WORKSTREAM=before\n");
+        WriteRoot(Elsewhere("fresh", "moving"));
+        await using var harness = new LifecycleHarness(Waiting(), settings: new Dictionary<string, string?>
+        {
+            ["Roots:Explicit:moving:Path"] = Elsewhere("fresh", "moving"),
+        });
+        Assert.Equal("before", (await SingleRootAsync(harness, "moving")).ProfileName);
+
+        File.WriteAllText(dotEnv, "WORKSTREAM=after\n");
+
+        Assert.Equal("after", (await SingleRootAsync(harness, "moving")).ProfileName);
+        Assert.DoesNotContain(await harness.Projects.ListProfilesAsync(), profile => profile.Name == "before");
+    }
+
+    /// <summary>
+    /// A profile's account is the one its roots share, when the .env files above them name it and its own environment
+    /// does not (#616); roots that disagree leave it its own environment's.
+    /// </summary>
+    [Fact]
+    public async Task ProfileAccount_IsTheOneItsRootsShare()
+    {
+        File.WriteAllText(Path.Combine(Directory.CreateDirectory(Elsewhere("account")).FullName, ".env"),
+            $"WORKSTREAM=shared\nCLAUDE_CONFIG_DIR={Elsewhere("claude-shared")}\n");
+        WriteRoot(Elsewhere("account", "one"));
+        WriteRoot(Elsewhere("account", "two"));
+        WriteRoot(Elsewhere("split", "three"), profile: "split");
+        WriteRoot(Elsewhere("split", "four"), profile: "split");
+        File.WriteAllText(Elsewhere("split", "four", ".env"), $"CLAUDE_CONFIG_DIR={Elsewhere("claude-other")}\n");
+        await using var harness = new LifecycleHarness(Waiting(), settings: new Dictionary<string, string?>
+        {
+            ["Roots:Scan:account"] = Elsewhere("account"),
+            ["Roots:Scan:split"] = Elsewhere("split"),
+        });
+
+        var roots = await harness.Projects.ListProjectRootsAsync();
+        var profiles = await harness.Projects.ListProfilesAsync();
+        var shared = Assert.Single(roots, root => root.Name == "one").Account;
+        Assert.Equal(shared, Assert.Single(roots, root => root.Name == "two").Account);
+        Assert.Equal(shared, Assert.Single(profiles, profile => profile.Name == "shared").Account);
+        var split = Assert.Single(profiles, profile => profile.Name == "split").Account;
+        Assert.NotEqual(Assert.Single(roots, root => root.Name == "four").Account, split);
+        Assert.Equal(Assert.Single(roots, root => root.Name == "three").Account, split);
     }
 
     [Fact]

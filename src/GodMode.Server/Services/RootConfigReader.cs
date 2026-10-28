@@ -130,7 +130,8 @@ public class RootConfigReader : IRootConfigReader
             Base: new CreateAction(BaseConfigFileName,
                 Delete: NormalizeScriptPaths(baseRaw.Delete, godModeRootPath),
                 Status: NormalizeScriptPaths(baseRaw.Status, godModeRootPath) is [var status] ? status : null,
-                Environment: baseRaw.Environment));
+                Environment: baseRaw.Environment),
+            DotEnvProfile: DotEnvFiles.ProfileOf(dotEnv));
     }
 
     /// <summary>A root's config when it has none: one action, the default form, and the environment of the .env files above it.</summary>
@@ -138,7 +139,7 @@ public class RootConfigReader : IRootConfigReader
         new(Actions: new Dictionary<string, CreateAction>(StringComparer.OrdinalIgnoreCase)
         {
             ["Create"] = new("Create", InputSchema: DefaultSchema, Environment: dotEnv)
-        }, Environment: dotEnv);
+        }, Environment: dotEnv, DotEnvProfile: DotEnvFiles.ProfileOf(dotEnv));
 
     /// <summary>
     /// Discovers config.*.json files and returns a dictionary of actionName → RawConfig.

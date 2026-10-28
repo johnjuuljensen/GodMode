@@ -230,7 +230,7 @@ root-name/
 
 **Actions that start no session.** `"session": false` makes an action its scripts alone: prepare and create run in the root, with its environment and inputs, and no folder is made, nothing tracked and no claude started. It is how a root provisions the host: a provisioning root's action makes a new root as a sibling in its scan folder, which live roots then list, and the server reads the roots again once it has run. The server still writes no config (5.3): the script does. Of its result file only `message` is read, which the app shows in place of opening a session; `project_path` and its checks do not apply. `sharedFolder`, `scriptsCreateFolder` or no create script with it is a config error: its create is refused, and the listing leaves that action out (logged), keeping the root's profile and other actions. The server README (*Actions that start no session*) has the details.
 
-**Profile assignment**: an explicit root's entry `Profile` (`Roots:Explicit:<name>:Profile`) puts it in that profile, over its `config.json`: the host's config holds the profiles' secrets, so it says whose a root gets. Otherwise `profileName` in `config.json` puts the root in that profile, and any other root goes to `Default`.
+**Profile assignment** (#616), lowest to highest: `Default`, an explicit root's entry `Profile` (`Roots:Explicit:<name>:Profile`), `WORKSTREAM` in the `.env` files above the root (nearer wins), `profileName` in its `config.json`, which wins: the same order as the root's environment. (From #344 to #616 the entry won over `profileName`.)
 
 **MCP servers** are not root config: a repo brings its own, and GodMode adds only its own MCP endpoint (Section 8).
 
@@ -374,7 +374,7 @@ D:\notes\                          # Roots:Explicit:notes, in Private unless its
 
 ### Key Properties
 
-- **A root's profile** is its explicit entry's `Profile`, else its `config.json`'s `profileName`, else `Default`. A profile is listed when it has a root; one under `Profiles` alone is only settings
+- **A root's profile** is its `config.json`'s `profileName`, else `WORKSTREAM` in the `.env` files above it, else its explicit entry's `Profile`, else `Default` (#616). A profile is listed when it has a root; one under `Profiles` alone is only settings
 - **A profile's environment** (`Profiles:<name>:Environment:<VAR>`) reaches every session and root script of its roots; the root's own `environment` wins a clash. `CLAUDE_CONFIG_DIR` there pins the profile's sessions to one Claude account
 - **Secrets stay in environment variables**: `Profiles__Work__Environment__JIRA_TOKEN` in the server's environment is the same setting as the file's, and needs no file
 - **Adding a profile or a root** = an entry in the instance's config file, or a folder with a `.godmode-root/` in a scan folder, on the host. No hub method creates, edits or deletes one
