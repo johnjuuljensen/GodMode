@@ -68,7 +68,7 @@ public class RootConfigReader : IRootConfigReader
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to read config from {RootPath}, using default config", rootPath);
-            return BuildDefaultConfig();
+            return BuildDefaultConfig(DotEnvFiles.Read(rootPath, _logger));
         }
     }
 
@@ -79,14 +79,17 @@ public class RootConfigReader : IRootConfigReader
     {
         var godModeRootPath = Path.Combine(rootPath, GodModeRootDir);
         var baseConfigPath = Path.Combine(godModeRootPath, BaseConfigFileName);
+        // The .env files above the root lie under its config.json's environment, and so under every action's (issue #614)
+        var dotEnv = DotEnvFiles.Read(rootPath, _logger);
 
         if (!File.Exists(baseConfigPath))
         {
             _logger.LogDebug("No config found in {RootPath}, using default config", rootPath);
-            return BuildDefaultConfig();
+            return BuildDefaultConfig(dotEnv);
         }
 
         var baseRaw = ReadRawConfig(baseConfigPath);
+        baseRaw = baseRaw with { Environment = MergeDictionaries(dotEnv, baseRaw.Environment) };
         var actionOverlays = DiscoverActionConfigs(godModeRootPath, strict);
 
         Dictionary<string, CreateAction> actions;
@@ -130,11 +133,12 @@ public class RootConfigReader : IRootConfigReader
                 Environment: baseRaw.Environment));
     }
 
-    private static RootConfig BuildDefaultConfig() =>
+    /// <summary>A root's config when it has none: one action, the default form, and the environment of the .env files above it.</summary>
+    private static RootConfig BuildDefaultConfig(Dictionary<string, string>? dotEnv) =>
         new(Actions: new Dictionary<string, CreateAction>(StringComparer.OrdinalIgnoreCase)
         {
-            ["Create"] = new("Create", InputSchema: DefaultSchema)
-        });
+            ["Create"] = new("Create", InputSchema: DefaultSchema, Environment: dotEnv)
+        }, Environment: dotEnv);
 
     /// <summary>
     /// Discovers config.*.json files and returns a dictionary of actionName → RawConfig.

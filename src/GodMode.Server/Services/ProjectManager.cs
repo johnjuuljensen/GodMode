@@ -3391,7 +3391,8 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
 
     /// <summary>
     /// Merges environment from all layers and applies ${VAR} expansion + optional prefix stripping.
-    /// Merge order: profile env (stripped vars + explicit config) → action env, then ${VAR} expansion.
+    /// Merge order: profile env (stripped vars + explicit config) → action env, then ${VAR} expansion. The action's
+    /// environment holds the .env files above the root under the root's own (<see cref="DotEnvFiles"/>).
     /// </summary>
     private static Dictionary<string, string>? MergeAndExpandEnvironment(
         Dictionary<string, string>? profileEnv,
