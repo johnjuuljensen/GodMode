@@ -564,9 +564,10 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
     /// The roots <paramref name="sources"/> name: the explicit ones, then each scan folder's, in ordinal
     /// order of their keys. One name, one root per server, and one folder, one root: an explicit root
     /// wins a clash, and between scan folders the first key does. Each loser is logged once, with both
-    /// paths, while the clash lasts. A root's profile is its explicit entry's <c>Profile</c>, else its
-    /// config.json's <c>profileName</c>, else <c>Default</c>: the host's config, which holds the profiles'
-    /// secrets, picks whose a root gets, over what the root's folder says. Its title is config.json's
+    /// paths, while the clash lasts. A root's profile is its config.json's <c>profileName</c>, else <c>WORKSTREAM</c>
+    /// in the .env files above it, else its explicit entry's <c>Profile</c>, else <c>Default</c> (issue #616, which
+    /// reversed #344's entry over <c>profileName</c>): the same order as its environment's, the root's own config
+    /// over the folder tree's over the host's. Its title is config.json's
     /// <c>title</c>, else the entry's <c>Title</c>, else none (the name).
     /// </summary>
     private List<FoundRoot> FindRoots(RootSources sources)
@@ -595,7 +596,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
             {
                 var read = _rootConfigReader.ReadConfig(path);
                 var config = read with { Title = read.Title ?? entryTitle };
-                var root = new FoundRoot(name, path, entryProfile ?? config.ProfileName ?? "Default", config, source);
+                var root = new FoundRoot(name, path, config.ProfileName ?? config.DotEnvProfile ?? entryProfile ?? "Default", config, source);
                 roots.Add(root);
                 byName[name] = root;
                 byPath[path] = root;
@@ -782,8 +783,6 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
     /// </summary>
     private RootsView BuildRootsView(ProfileSnapshot snap)
     {
-        var profiles = snap.Profiles.Select(kvp => new ProfileInfo(kvp.Key, kvp.Value.Description,
-            AccountLimits.KeyOf(ProfileAccount(kvp.Key, kvp.Value)), kvp.Value.UsageCeiling)).ToArray();
         var roots = AllRoots(snap).Select(root =>
         {
             // The default root, there when no source names one, was found by no read
@@ -795,6 +794,12 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
             return new ProjectRootInfo(root.Root, config.Description, actions, ProfileName: root.Profile, Title: config.Title,
                 Account: AccountLimits.KeyOf(RootAccount(snap, root.Profile, config, null)), UsageCeiling: CeilingOf(snap, root.Profile, config));
         }).ToArray();
+        // A profile's account is the one all its roots run on, when they agree (the .env files above them may name it, issue #616),
+        // else its own environment's
+        var profiles = snap.Profiles.Select(kvp => new ProfileInfo(kvp.Key, kvp.Value.Description,
+            roots.Where(r => string.Equals(r.ProfileName, kvp.Key, StringComparison.OrdinalIgnoreCase)).Select(r => r.Account).Distinct().ToArray() is [var shared]
+                ? shared : AccountLimits.KeyOf(ProfileAccount(kvp.Key, kvp.Value)),
+            kvp.Value.UsageCeiling)).ToArray();
         return new RootsView(roots, profiles, JsonSerializer.Serialize(new { roots, profiles }, JsonDefaults.Options));
     }
 

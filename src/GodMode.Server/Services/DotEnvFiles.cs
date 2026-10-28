@@ -58,6 +58,13 @@ public static class DotEnvFiles
         return env;
     }
 
+    /// <summary>The key that names a root's profile (issue #616; WORKSTREAM, the user's name for a major line of work across their tools), under its <c>config.json</c>'s <c>profileName</c> and over its explicit entry's <c>Profile</c>.</summary>
+    public const string ProfileKey = "WORKSTREAM";
+
+    /// <summary>The profile <paramref name="dotEnv"/> names (<see cref="ProfileKey"/>), trimmed; null when it names none.</summary>
+    public static string? ProfileOf(IReadOnlyDictionary<string, string>? dotEnv) =>
+        dotEnv?.GetValueOrDefault(ProfileKey)?.Trim() is { Length: > 0 } profile ? profile : null;
+
     /// <summary>The <c>.env</c> files from <paramref name="rootPath"/> up to its drive's root, nearest first.</summary>
     internal static IEnumerable<string> FilesAbove(string rootPath)
     {
